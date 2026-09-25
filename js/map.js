@@ -55,6 +55,12 @@ class BackroomsMap {
         this.obstacles = [];
         this.pillars = [];
         this.lights = [];
+        this.openRooms = [
+            { x0: 9, x1: 17, z0: 11, z1: 15 },
+            { x0: 3, x1: 8, z0: 5, z1: 8 },
+            { x0: 17, x1: 22, z0: 18, z1: 21 }
+        ];
+        this.manilaRoom = { x: 20, z: 19, radiusCells: 2.2 };
 
         this.parse();
     }
@@ -99,6 +105,15 @@ class BackroomsMap {
         this.grid[20][14] = 0;
         this.grid[17][6] = 0;
 
+        // Level 0 alternates tight corridors with strangely large, nearly empty rooms.
+        for (const room of this.openRooms) {
+            for (let z = room.z0; z <= room.z1; z++) {
+                for (let x = room.x0; x <= room.x1; x++) {
+                    if (this.grid[z][x] === 1) this.grid[z][x] = 0;
+                }
+            }
+        }
+
         // Generate ceiling fluorescent light positions at regular walkable intervals
         for (let z = 1; z < this.height - 1; z += 2) {
             for (let x = 1; x < this.width - 1; x += 2) {
@@ -108,6 +123,8 @@ class BackroomsMap {
                     let state = 'normal';
                     if (rand < 0.22) state = 'flicker';
                     else if (rand < 0.35) state = 'dark'; // Dark scary zone
+                    // The Manila Room has one dim, warm fixture amid unlit panels.
+                    if (this.isManilaRoom(x, z)) state = x === 19 && z === 19 ? 'manila' : 'dark';
 
                     this.lights.push({
                         x, z,
@@ -128,8 +145,9 @@ class BackroomsMap {
         const reservedLoot = [...reserved, ...this.hazards, ...this.memoryFragments];
         this.weaponSpawns = this.pickSpecialCells(1, reservedLoot, 9);
         this.awmSpawns = this.pickSpecialCells(1, [...reservedLoot, ...this.weaponSpawns], 9);
-        this.ammoCaches = this.pickSpecialCells(4, [...reservedLoot, ...this.weaponSpawns, ...this.awmSpawns], 9);
-        this.lockers = this.pickSpecialCells(4, [...reservedLoot, ...this.weaponSpawns, ...this.awmSpawns, ...this.ammoCaches], 16);
+        this.m7Spawns = this.pickSpecialCells(2, [...reservedLoot, ...this.weaponSpawns, ...this.awmSpawns], 9);
+        this.ammoCaches = this.pickSpecialCells(5, [...reservedLoot, ...this.weaponSpawns, ...this.awmSpawns, ...this.m7Spawns], 9);
+        this.lockers = this.pickSpecialCells(4, [...reservedLoot, ...this.weaponSpawns, ...this.awmSpawns, ...this.m7Spawns, ...this.ammoCaches], 16);
         this.generateObstacles();
     }
 
@@ -138,7 +156,7 @@ class BackroomsMap {
             this.playerSpawn, this.monsterSpawn, this.exitDoor,
             ...this.keycards, ...this.almondWaters, ...this.batteries,
             ...this.hazards, ...this.memoryFragments, ...this.weaponSpawns,
-            ...this.awmSpawns, ...this.ammoCaches, ...this.lockers
+            ...this.awmSpawns, ...this.m7Spawns, ...this.ammoCaches, ...this.lockers
         ];
         const hash = (x, z, salt) => {
             const value = Math.sin(x * 127.1 + z * 311.7 + salt * 43.13) * 43758.5453;
@@ -195,6 +213,40 @@ class BackroomsMap {
         return this.grid[gz][gx] === 0;
     }
 
+    isManilaRoom(gx, gz) {
+        const dx = gx - this.manilaRoom.x;
+        const dz = gz - this.manilaRoom.z;
+        return dx * dx + dz * dz <= this.manilaRoom.radiusCells ** 2;
+    }
+
+    isViewpointClear(x, y, z, margin = 0.08) {
+        const cell = this.worldToGrid(x, z);
+        if (!this.isWalkable(cell.x, cell.z)) return false;
+        for (let oz = -1; oz <= 1; oz++) {
+            for (let ox = -1; ox <= 1; ox++) {
+                const gx = cell.x + ox;
+                const gz = cell.z + oz;
+                if (this.isWalkable(gx, gz)) continue;
+                if (Math.abs(x - gx * this.cellSize) < this.cellSize / 2 + margin &&
+                    Math.abs(z - gz * this.cellSize) < this.cellSize / 2 + margin) return false;
+            }
+        }
+        return !this.obstacles.some(item => y < item.height &&
+            Math.abs(x - item.x) < item.halfX + margin &&
+            Math.abs(z - item.z) < item.halfZ + margin);
+    }
+
+    clampPeekOffset(baseX, baseZ, offsetX, offsetZ, eyeY) {
+        const steps = Math.ceil(Math.hypot(offsetX, offsetZ) / 0.05);
+        for (let i = 1; i <= steps; i++) {
+            const t = i / steps;
+            if (!this.isViewpointClear(baseX + offsetX * t, eyeY, baseZ + offsetZ * t)) {
+                return (i - 1) / steps;
+            }
+        }
+        return 1;
+    }
+
     hasClearShot(from, to) {
         const dx = to.x - from.x;
         const dz = to.z - from.z;
@@ -213,7 +265,7 @@ class BackroomsMap {
         return true;
     }
 
-    getChaseWaypoint(from, to) {
+    getChaseWaypoint(from, to, avoidManila = false) {
         const start = this.worldToGrid(from.x, from.z);
         const goal = this.worldToGrid(to.x, to.z);
         if (!this.isWalkable(start.x, start.z) || !this.isWalkable(goal.x, goal.z)) return null;
@@ -239,7 +291,7 @@ class BackroomsMap {
             for (const [dx, dz] of directions) {
                 const nx = x + dx;
                 const nz = z + dz;
-                if (!this.isWalkable(nx, nz)) continue;
+                if (!this.isWalkable(nx, nz) || (avoidManila && this.isManilaRoom(nx, nz))) continue;
                 const next = indexOf(nx, nz);
                 if (parent[next] !== -1) continue;
                 parent[next] = current;

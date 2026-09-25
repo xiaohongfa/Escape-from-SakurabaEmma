@@ -12,6 +12,9 @@ class BackroomsAudio {
         this.barkLoadPromise = null;
         this.barkVolume = 1.4;
         this.deathCallClips = null;
+        this.m7ReloadBuffer = null;
+        this.m7OriginalClip = null;
+        this.m7GunStopTimer = null;
         this.smilerBarks = new Map();
         this.heartbeatInterval = null;
         this.lastStepTime = 0;
@@ -28,6 +31,7 @@ class BackroomsAudio {
         this.startFluorescentHum();
         this.loadEntityBark();
         this.loadDeathCalls();
+        this.loadM7Audio();
     }
 
     resume() {
@@ -37,6 +41,7 @@ class BackroomsAudio {
     }
 
     suspend() {
+        this.stopM7Gunfire();
         if (this.ctx && this.ctx.state === 'running') this.ctx.suspend();
     }
 
@@ -206,6 +211,52 @@ class BackroomsAudio {
         actionGain.connect(this.masterGain);
         action.start(actionAt);
         action.stop(actionAt + 0.09);
+    }
+
+    loadM7Audio() {
+        const assets = window.GAME_ASSETS || {};
+        this.m7OriginalClip = new Audio(assets.m7_original || 'assets/audio/m7-original.m4a');
+        this.m7OriginalClip.preload = 'auto';
+        this.m7OriginalClip.volume = 0.62;
+        this.m7OriginalClip.load();
+        fetch(assets.m7_reload || 'assets/audio/m7-reload.wav')
+            .then(response => response.arrayBuffer())
+            .then(data => this.ctx.decodeAudioData(data))
+            .then(buffer => { this.m7ReloadBuffer = buffer; })
+            .catch(error => console.error('M7 reload audio could not be decoded', error));
+    }
+
+    playM7Clip(buffer, volume) {
+        if (!this.ctx || this.isMuted || !buffer) return false;
+        const source = this.ctx.createBufferSource();
+        const gain = this.ctx.createGain();
+        source.buffer = buffer;
+        gain.gain.value = volume;
+        source.connect(gain);
+        gain.connect(this.masterGain);
+        source.start();
+        return true;
+    }
+
+    playM7Shot() {
+        if (this.isMuted || !this.m7OriginalClip) return;
+        clearTimeout(this.m7GunStopTimer);
+        if (this.m7OriginalClip.paused || this.m7OriginalClip.ended) {
+            this.m7OriginalClip.currentTime = 0;
+            this.m7OriginalClip.play().catch(error => console.warn('M7 original audio could not play', error));
+        }
+        this.m7GunStopTimer = setTimeout(() => this.stopM7Gunfire(), 900);
+    }
+
+    stopM7Gunfire() {
+        clearTimeout(this.m7GunStopTimer);
+        if (!this.m7OriginalClip) return;
+        this.m7OriginalClip.pause();
+        try { this.m7OriginalClip.currentTime = 0; } catch (_) {}
+    }
+
+    playM7Reload() {
+        if (!this.playM7Clip(this.m7ReloadBuffer, 0.8) && !this.m7ReloadBuffer) this.playClick();
     }
 
     playHitConfirm(killed = false) {

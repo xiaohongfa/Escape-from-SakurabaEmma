@@ -12,7 +12,7 @@ class BackroomsGame {
         this.isGameOver = false;
         this.isVictory = false;
         this.sanity = 100;
-        this.staminaMax = 160;
+        this.staminaMax = 96;
         this.stamina = this.staminaMax;
         this.battery = 100;
         this.keysFound = 0;
@@ -30,6 +30,7 @@ class BackroomsGame {
         this.isGrounded = true;
         this.headBobOffset = 0;
         this.hazardHintShown = false;
+        this.manilaHintShown = false;
         this.isGodMode = false;
         this.isInvincible = false;
         this.noClip = false;
@@ -39,6 +40,11 @@ class BackroomsGame {
         this.infiniteAmmo = false;
         this.gunOwned = false;
         this.awmOwned = false;
+        this.m7Owned = false;
+        this.m7Magazine = 20;
+        this.m7Reserve = 40;
+        this.m7ReloadEnd = 0;
+        this.m7ReloadStart = 0;
         this.ammo = 0;
         this.selectedSlot = 1;
         this.shotCooldown = 0;
@@ -47,6 +53,7 @@ class BackroomsGame {
         this.isAiming = false;
         this.isAimToggled = false;
         this.isRightMouseHeld = false;
+        this.isLeftMouseHeld = false;
         this.isCrouching = false;
         this.isSliding = false;
         this.slideTimer = 0;
@@ -65,6 +72,7 @@ class BackroomsGame {
         this.peekOffset = 0;
         this.appliedPeekX = 0;
         this.appliedPeekZ = 0;
+        this.appliedPeekY = 0;
 
         // Timing
         this.clock = new THREE.Clock();
@@ -93,6 +101,7 @@ class BackroomsGame {
         this.visualSeed = Math.random() * 10000;
         this.renderTimer = 0;
         this.targetFps = 45;
+        this.comfortMode = true;
         this.lightRefreshTimer = 0;
 
         this.init();
@@ -165,7 +174,88 @@ class BackroomsGame {
         this.awmViewModel.rotation.y = Math.PI;
         this.awmViewModel.visible = false;
         this.camera.add(this.awmViewModel);
+        this.m7ViewModel = this.createM7Model();
+        this.m7ViewModel.position.set(0.37, -0.22, -1.1);
+        this.m7ViewModel.rotation.y = 0.28;
+        this.m7ViewModel.visible = false;
+        this.camera.add(this.m7ViewModel);
         this.shotRaycaster = new THREE.Raycaster();
+    }
+
+    createM7Model(isPickup = false) {
+        const group = new THREE.Group();
+        const body = new THREE.MeshStandardMaterial({ color: 0x232a25, roughness: 0.48, metalness: 0.45 });
+        const rail = new THREE.MeshStandardMaterial({ color: 0x111614, roughness: 0.38, metalness: 0.64 });
+        const steel = new THREE.MeshStandardMaterial({ color: 0x525b54, roughness: 0.46, metalness: 0.6 });
+        const grip = new THREE.MeshStandardMaterial({ color: 0x1b211d, roughness: 0.85, metalness: 0.08 });
+        const box = (width, height, depth, x, y, z, material) => {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+            mesh.position.set(x, y, z);
+            group.add(mesh);
+            return mesh;
+        };
+        box(0.27, 0.18, 0.54, 0, 0, 0, body);                 // Receiver
+        box(0.24, 0.14, 0.78, 0, 0, -0.64, body);           // Long ventilated handguard
+        box(0.25, 0.045, 1.19, 0, 0.12, -0.28, rail);      // Top accessory rail
+        box(0.19, 0.11, 0.46, 0, -0.005, 0.48, grip);      // Folding stock
+        box(0.25, 0.2, 0.07, 0, -0.015, 0.72, grip);       // Butt pad
+        const magazine = box(0.15, 0.34, 0.2, 0, -0.26, 0.01, grip);
+        magazine.rotation.x = -0.09;
+        group.userData.magazine = magazine;
+        const pistolGrip = box(0.13, 0.29, 0.16, 0, -0.25, 0.31, grip);
+        pistolGrip.rotation.x = -0.21;
+        const foregrip = box(0.1, 0.22, 0.13, 0, -0.19, -0.69, grip);
+        foregrip.rotation.x = -0.34;
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.04, 0.57, 8), steel);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(0, 0.005, -1.27);
+        group.add(barrel);
+        const suppressor = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.42, 10), rail);
+        suppressor.rotation.x = Math.PI / 2;
+        suppressor.position.set(0, 0.005, -1.64);
+        group.add(suppressor);
+        box(0.1, 0.065, 0.18, 0, 0.18, 0.12, rail);        // Holographic sight base
+        box(0.035, 0.17, 0.07, -0.085, 0.29, 0.12, rail);
+        box(0.035, 0.17, 0.07, 0.085, 0.29, 0.12, rail);
+        box(0.205, 0.034, 0.07, 0, 0.38, 0.12, steel);
+        for (let i = 0; i < 3; i++) {
+            box(0.012, 0.055, 0.09, -0.126, 0.005, -0.44 - i * 0.18, steel);
+        }
+        const flash = new THREE.Mesh(
+            new THREE.SphereGeometry(0.08, 6, 4),
+            new THREE.MeshBasicMaterial({ color: 0xffc253, transparent: true, opacity: 0.88, blending: THREE.AdditiveBlending })
+        );
+        flash.position.set(0, 0.005, -1.88);
+        flash.visible = false;
+        group.add(flash);
+        group.userData.muzzleFlash = flash;
+        if (!isPickup) {
+            const sleeveMaterial = new THREE.MeshStandardMaterial({ color: 0x252c33, roughness: 0.92 });
+            const skinMaterial = new THREE.MeshStandardMaterial({ color: 0xc9927b, roughness: 0.93 });
+            const segment = (start, end, radius, material, parent = group) => {
+                const a = new THREE.Vector3(...start);
+                const b = new THREE.Vector3(...end);
+                const direction = b.clone().sub(a);
+                const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.84, radius, direction.length(), 8), material);
+                mesh.position.copy(a).add(b).multiplyScalar(0.5);
+                mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+                parent.add(mesh);
+            };
+            const hand = (x, y, z, radius, parent = group) => {
+                const palm = new THREE.Mesh(new THREE.SphereGeometry(radius, 10, 7), skinMaterial);
+                palm.position.set(x, y, z);
+                palm.scale.set(1, 0.85, 0.7);
+                parent.add(palm);
+            };
+            segment([-0.48, -0.88, 0.55], [-0.08, -0.25, -0.69], 0.115, sleeveMaterial);
+            const reloadHand = new THREE.Group();
+            group.add(reloadHand);
+            group.userData.reloadHand = reloadHand;
+            segment([-0.06, -0.8, 0.58], [-0.2, -0.2, 0.33], 0.12, sleeveMaterial, reloadHand);
+            hand(-0.08, -0.17, -0.69, 0.1); // Support hand wraps the foregrip.
+            hand(-0.2, -0.16, 0.33, 0.082, reloadHand); // Trigger hand holds the pistol grip.
+        }
+        return group;
     }
 
     createPistolModel() {
@@ -300,6 +390,7 @@ class BackroomsGame {
         const wallGeo = new THREE.BoxGeometry(cs, wh, cs);
         const wallMat = new THREE.MeshStandardMaterial({
             map: this.textures.wall,
+            color: 0xf2e3a2,
             roughness: 0.85,
             metalness: 0.05
         });
@@ -336,7 +427,12 @@ class BackroomsGame {
                 instances.setMatrixAt(i / 2, instanceAnchor.matrix);
                 const shade = this.visualNoise(x, z, 17.3);
                 const tint = shadeRange[0] + shade * (shadeRange[1] - shadeRange[0]);
-                instances.setColorAt(i / 2, new THREE.Color(tint, tint * (0.985 + shade * 0.025), tint * (0.91 + shade * 0.06)));
+                const manilaTint = Math.hypot(x - this.map.manilaRoom.x, z - this.map.manilaRoom.z) < 3.8;
+                instances.setColorAt(i / 2, new THREE.Color(
+                    tint * (manilaTint ? 0.94 : 1),
+                    tint * (manilaTint ? 0.84 : 0.985 + shade * 0.025),
+                    tint * (manilaTint ? 0.68 : 0.91 + shade * 0.06)
+                ));
             }
             instances.instanceMatrix.needsUpdate = true;
             if (instances.instanceColor) instances.instanceColor.needsUpdate = true;
@@ -344,6 +440,8 @@ class BackroomsGame {
         };
         addInstances(wallGeo, wallPositions, [0.9, 1.08]);
         addInstances(pillarGeo, pillarPositions, [0.82, 1.13]);
+        this.addArchitecturalTrim();
+        this.addDoorwayFrames();
         this.addMapDetails();
         this.addSurfaceWear();
         this.addObstacles();
@@ -374,6 +472,7 @@ class BackroomsGame {
             if (lt.state === 'dark') return; // Broken dark light
             this.ceilingLightCandidates.push(lt);
         });
+        this.addCeilingFixtures();
         const activeLightCount = Math.min(8, this.ceilingLightCandidates.length);
         for (let i = 0; i < activeLightCount; i++) {
             const light = new THREE.PointLight(0xfff6cf, 1.2, 9, 1.5);
@@ -384,6 +483,117 @@ class BackroomsGame {
 
         // 6. Spawn Collectibles
         this.spawnItems();
+    }
+
+    addArchitecturalTrim() {
+        const cs = this.map.cellSize;
+        const faces = [];
+        for (let z = 1; z < this.map.height - 1; z++) {
+            for (let x = 1; x < this.map.width - 1; x++) {
+                if (this.map.grid[z][x] !== 1) continue;
+                if (this.map.isWalkable(x, z - 1)) faces.push({ x, z: z - 0.5, turn: 0 });
+                if (this.map.isWalkable(x, z + 1)) faces.push({ x, z: z + 0.5, turn: 0 });
+                if (this.map.isWalkable(x - 1, z)) faces.push({ x: x - 0.5, z, turn: Math.PI / 2 });
+                if (this.map.isWalkable(x + 1, z)) faces.push({ x: x + 0.5, z, turn: Math.PI / 2 });
+            }
+        }
+        if (!faces.length) return;
+        const trim = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(cs, 0.16, 0.07),
+            new THREE.MeshStandardMaterial({ color: 0xb9a96d, roughness: 0.94 }),
+            faces.length
+        );
+        const anchor = new THREE.Object3D();
+        faces.forEach((face, index) => {
+            anchor.position.set(face.x * cs, 0.11, face.z * cs);
+            anchor.rotation.set(0, face.turn, 0);
+            anchor.updateMatrix();
+            trim.setMatrixAt(index, anchor.matrix);
+        });
+        trim.instanceMatrix.needsUpdate = true;
+        this.scene.add(trim);
+
+        // Sparse sockets make the wall surfaces read like the dated retail/office rooms.
+        const socketFaces = faces.filter((face, index) => index % 11 === 4);
+        const sockets = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(0.17, 0.14, 0.025),
+            new THREE.MeshStandardMaterial({ color: 0xc7b879, roughness: 0.92 }),
+            socketFaces.length
+        );
+        socketFaces.forEach((face, index) => {
+            anchor.position.set(face.x * cs, 0.43, face.z * cs);
+            anchor.rotation.set(0, face.turn, 0);
+            anchor.updateMatrix();
+            sockets.setMatrixAt(index, anchor.matrix);
+        });
+        sockets.instanceMatrix.needsUpdate = true;
+        this.scene.add(sockets);
+    }
+
+    addCeilingFixtures() {
+        const lights = this.map.lights;
+        if (!lights.length) return;
+        const frame = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(2.05, 0.09, 0.57),
+            new THREE.MeshStandardMaterial({ color: 0x797869, roughness: 0.58, metalness: 0.35 }),
+            lights.length
+        );
+        const diffuser = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(1.88, 0.035, 0.45),
+            new THREE.MeshBasicMaterial({ color: 0xfff5c8 }),
+            lights.length
+        );
+        const anchor = new THREE.Object3D();
+        lights.forEach((light, index) => {
+            anchor.rotation.set(0, (light.x + light.z) % 3 === 0 ? Math.PI / 2 : 0, 0);
+            anchor.position.set(light.worldX, this.map.wallHeight - 0.065, light.worldZ);
+            anchor.updateMatrix();
+            frame.setMatrixAt(index, anchor.matrix);
+            anchor.position.y -= 0.062;
+            anchor.updateMatrix();
+            diffuser.setMatrixAt(index, anchor.matrix);
+            const brightness = light.state === 'dark' ? 0.22 : light.state === 'flicker' ? 0.74 : light.state === 'manila' ? 0.63 : 1;
+            diffuser.setColorAt(index, new THREE.Color(brightness, brightness * (light.state === 'manila' ? 0.68 : 0.98), brightness * (light.state === 'manila' ? 0.42 : 0.86)));
+        });
+        frame.instanceMatrix.needsUpdate = true;
+        diffuser.instanceMatrix.needsUpdate = true;
+        if (diffuser.instanceColor) diffuser.instanceColor.needsUpdate = true;
+        this.scene.add(frame, diffuser);
+    }
+
+    addDoorwayFrames() {
+        const openings = [];
+        for (const room of this.map.openRooms) {
+            for (let x = room.x0; x <= room.x1; x++) {
+                if (this.map.isWalkable(x, room.z0) && this.map.isWalkable(x, room.z0 - 1)) openings.push({ x, z: room.z0 - 0.5, turn: 0 });
+                if (this.map.isWalkable(x, room.z1) && this.map.isWalkable(x, room.z1 + 1)) openings.push({ x, z: room.z1 + 0.5, turn: 0 });
+            }
+            for (let z = room.z0; z <= room.z1; z++) {
+                if (this.map.isWalkable(room.x0, z) && this.map.isWalkable(room.x0 - 1, z)) openings.push({ x: room.x0 - 0.5, z, turn: Math.PI / 2 });
+                if (this.map.isWalkable(room.x1, z) && this.map.isWalkable(room.x1 + 1, z)) openings.push({ x: room.x1 + 0.5, z, turn: Math.PI / 2 });
+            }
+        }
+        if (!openings.length) return;
+        const material = new THREE.MeshStandardMaterial({ color: 0xcfc28a, roughness: 0.93 });
+        const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.12, 2.95, 0.2), material, openings.length * 2);
+        const lintels = new THREE.InstancedMesh(new THREE.BoxGeometry(3.8, 0.17, 0.2), material, openings.length);
+        const anchor = new THREE.Object3D();
+        openings.forEach((opening, index) => {
+            for (let side = 0; side < 2; side++) {
+                const lateral = side ? 1.9 : -1.9;
+                anchor.position.set(opening.x * this.map.cellSize + Math.cos(opening.turn) * lateral, 1.48,
+                    opening.z * this.map.cellSize - Math.sin(opening.turn) * lateral);
+                anchor.rotation.set(0, opening.turn, 0);
+                anchor.updateMatrix();
+                posts.setMatrixAt(index * 2 + side, anchor.matrix);
+            }
+            anchor.position.set(opening.x * this.map.cellSize, 3.02, opening.z * this.map.cellSize);
+            anchor.updateMatrix();
+            lintels.setMatrixAt(index, anchor.matrix);
+        });
+        posts.instanceMatrix.needsUpdate = true;
+        lintels.instanceMatrix.needsUpdate = true;
+        this.scene.add(posts, lintels);
     }
 
     visualNoise(x, z, salt = 0) {
@@ -892,6 +1102,15 @@ class BackroomsGame {
             this.items.push({ type: 'awm', mesh: pickup, pos: new THREE.Vector3(world.x, 0.48, world.z), baseY: 0.48, collected: false });
         }
 
+        for (const cell of this.map.m7Spawns) {
+            const world = this.map.gridToWorld(cell.x, cell.z);
+            const pickup = this.createM7Model(true);
+            pickup.position.set(world.x, 0.66, world.z);
+            pickup.rotation.y = this.visualNoise(cell.x, cell.z, 143) * Math.PI * 2;
+            this.scene.add(pickup);
+            this.items.push({ type: 'm7', mesh: pickup, pos: new THREE.Vector3(world.x, 0.66, world.z), baseY: 0.66, collected: false });
+        }
+
         const caches = this.map.ammoCaches;
         if (caches.length) {
             const geometry = new THREE.BoxGeometry(0.34, 0.2, 0.24);
@@ -924,7 +1143,7 @@ class BackroomsGame {
         const playerSpawn = this.map.playerSpawn;
         const chosenSpawns = [this.map.monsterSpawn];
         const desiredSpawns = [
-            { x: 7, z: 5 },
+            { x: 9, z: 4 },
             { x: 19, z: 8 },
             { x: 5, z: 17 },
             { x: 21, z: 20 },
@@ -934,16 +1153,25 @@ class BackroomsGame {
             { x: 20, z: 15 },
             { x: 12, z: 6 },
             { x: 4, z: 21 },
-            { x: 21, z: 3 }
+            { x: 21, z: 3 },
+            { x: 14, z: 20 },
+            { x: 7, z: 11 },
+            { x: 18, z: 12 },
+            { x: 10, z: 18 },
+            { x: 23, z: 12 },
+            { x: 2, z: 7 },
+            { x: 17, z: 23 },
+            { x: 13, z: 2 }
         ];
         const minFromPlayerSq = 6 * 6;
-        const minBetweenSmilersSq = 5 * 5;
+        const minBetweenSmilersSq = 3 * 3;
 
         for (const desired of desiredSpawns) {
             const candidates = [];
             for (let z = 1; z < this.map.height - 1; z++) {
                 for (let x = 1; x < this.map.width - 1; x++) {
                     if (!this.map.isWalkable(x, z)) continue;
+                    if (this.map.isManilaRoom(x, z)) continue;
                     const playerDx = x - playerSpawn.x;
                     const playerDz = z - playerSpawn.z;
                     if (playerDx * playerDx + playerDz * playerDz < minFromPlayerSq) continue;
@@ -1005,15 +1233,18 @@ class BackroomsGame {
 
             const number = e.code.startsWith('Digit') ? Number(e.code.slice(5))
                 : e.code.startsWith('Numpad') ? Number(e.code.slice(6)) : 0;
-            if (number >= 1 && number <= 4 && !e.repeat) this.selectSlot(number);
+            if (number >= 1 && number <= 5 && !e.repeat) this.selectSlot(number);
 
             if (e.code === 'Space') {
                 e.preventDefault();
                 if (!e.repeat) this.jump();
             }
-            if (e.code === 'KeyR' && !e.repeat && this.isRunning && (this.selectedSlot === 2 || this.selectedSlot === 4)) {
-                this.isAimToggled = !this.isAimToggled;
-                this.isAiming = this.isAimToggled || this.isRightMouseHeld;
+            if (e.code === 'KeyR' && !e.repeat && this.isRunning) {
+                if (this.selectedSlot === 5) this.reloadM7();
+                else if (this.selectedSlot === 2 || this.selectedSlot === 4) {
+                    this.isAimToggled = !this.isAimToggled;
+                    this.isAiming = this.isAimToggled || this.isRightMouseHeld;
+                }
             }
             if (e.code === 'KeyK' && !e.repeat) {
                 this.toggleXRayAndStamina();
@@ -1037,13 +1268,17 @@ class BackroomsGame {
             const canAct = this.isRunning && !this.isGameOver && !this.isVictory && !this.cheatMenuOpen
                 && pauseOverlay?.style.display !== 'flex'
                 && (e.target === this.container || this.container.contains(e.target));
-            if (e.button === 0 && canAct) this.useSelectedSlot();
-            if (e.button === 2 && canAct && (this.selectedSlot === 2 || this.selectedSlot === 4)) {
+            if (e.button === 0 && canAct) {
+                this.isLeftMouseHeld = true;
+                this.useSelectedSlot();
+            }
+            if (e.button === 2 && canAct && (this.selectedSlot === 2 || this.selectedSlot === 4 || this.selectedSlot === 5)) {
                 this.isRightMouseHeld = true;
                 this.isAiming = true;
             }
         });
         document.addEventListener('mouseup', (e) => {
+            if (e.button === 0) this.isLeftMouseHeld = false;
             if (e.button === 2) {
                 this.isRightMouseHeld = false;
                 this.isAiming = this.isAimToggled;
@@ -1055,6 +1290,7 @@ class BackroomsGame {
             this.slideRequested = false;
             this.sprintLatched = false;
             this.isRightMouseHeld = false;
+            this.isLeftMouseHeld = false;
             this.isAimToggled = false;
             this.isAiming = false;
             this.audio.suspend();
@@ -1119,13 +1355,14 @@ class BackroomsGame {
         this.hudKeys = document.getElementById('hud-keys');
         this.hudAlmond = document.getElementById('hud-almond');
         this.hotbar = document.getElementById('hotbar');
-        this.hotbarSlots = [1, 2, 3, 4].map(slot => document.getElementById(`hotbar-slot-${slot}`));
-        this.hotbarDetails = [1, 2, 3, 4].map(slot => document.getElementById(`hotbar-detail-${slot}`));
+        this.hotbarSlots = [1, 2, 3, 4, 5].map(slot => document.getElementById(`hotbar-slot-${slot}`));
+        this.hotbarDetails = [1, 2, 3, 4, 5].map(slot => document.getElementById(`hotbar-detail-${slot}`));
         this.promptText = document.getElementById('interaction-prompt');
         this.vhsDate = document.getElementById('vhs-date');
         this.vhsTape = document.getElementById('vhs-tape');
         this.setupBarkVolumeControls();
         this.setupFrameRateControls();
+        this.setupComfortControls();
         this.setupCheatWheel();
         document.querySelectorAll('[data-death-preview]').forEach(button => {
             button.addEventListener('click', () => this.audio.playDeathCall(Number(button.dataset.deathPreview)));
@@ -1144,6 +1381,20 @@ class BackroomsGame {
                 this.renderTimer = 0;
                 document.querySelectorAll('.fps-select').forEach(other => { other.value = select.value; });
                 try { localStorage.setItem('gameFpsLimit', select.value); } catch (_) {}
+            });
+        });
+    }
+
+    setupComfortControls() {
+        try { this.comfortMode = localStorage.getItem('gameComfortMode') !== 'off'; } catch (_) {}
+        document.body.classList.toggle('comfort-mode', this.comfortMode);
+        document.querySelectorAll('.comfort-mode-checkbox').forEach(input => {
+            input.checked = this.comfortMode;
+            input.addEventListener('change', () => {
+                this.comfortMode = input.checked;
+                document.body.classList.toggle('comfort-mode', this.comfortMode);
+                document.querySelectorAll('.comfort-mode-checkbox').forEach(other => { other.checked = this.comfortMode; });
+                try { localStorage.setItem('gameComfortMode', this.comfortMode ? 'on' : 'off'); } catch (_) {}
             });
         });
     }
@@ -1254,7 +1505,7 @@ class BackroomsGame {
         this.setCheat('ammo', enabled);
         this.audio.playClick();
         this.showNotification(enabled
-            ? 'K 模式：已获得手枪与 AWM · Smiler 透视 · 无限体力与子弹（按 4 切换 AWM）'
+            ? 'K 模式：已获得手枪、AWM 与 M7 · Smiler 透视 · 无限体力与子弹（按 5 切换 M7）'
             : 'K 模式已关闭：恢复普通体力与弹药');
     }
 
@@ -1279,8 +1530,9 @@ class BackroomsGame {
             if (enabled) {
                 this.gunOwned = true;
                 this.awmOwned = true;
+                this.m7Owned = true;
                 this.ammo = Math.max(this.ammo, 20);
-                if (this.selectedSlot !== 2 && this.selectedSlot !== 4) this.selectSlot(2);
+                if (this.selectedSlot !== 2 && this.selectedSlot !== 4 && this.selectedSlot !== 5) this.selectSlot(2);
             }
         } else if (cheat === 'invincible') {
             this.isInvincible = enabled;
@@ -1320,7 +1572,11 @@ class BackroomsGame {
             this.showNotification('先找到地图里的 AWM，再按 [4] 装备');
             return;
         }
-        if (slot !== 2 && slot !== 4) {
+        if (slot === 5 && !this.m7Owned) {
+            this.showNotification('先找到地图里的 M7，再按 [5] 装备');
+            return;
+        }
+        if (slot !== 2 && slot !== 4 && slot !== 5) {
             this.isAimToggled = false;
             this.isRightMouseHeld = false;
             this.isAiming = false;
@@ -1328,6 +1584,7 @@ class BackroomsGame {
         this.selectedSlot = slot;
         this.pistolViewModel.visible = this.gunOwned && slot === 2;
         this.awmViewModel.visible = this.awmOwned && slot === 4;
+        this.m7ViewModel.visible = this.m7Owned && slot === 5;
         this.syncWeaponUI();
         this.audio.playClick();
     }
@@ -1346,12 +1603,13 @@ class BackroomsGame {
         if (this.hotbarDetails[3]) this.hotbarDetails[3].innerText = this.awmOwned
             ? (this.infiniteAmmo ? '弹药 ∞ · 一枪击杀' : `弹药 ${this.ammo} · 一枪击杀`)
             : '地图拾取';
+        if (this.hotbarDetails[4]) this.hotbarDetails[4].innerText = this.m7Owned
+            ? (this.infiniteAmmo ? '弹匣 ∞' : (this.m7ReloadEnd ? '换弹中…' : `${this.m7Magazine}/20 · 备弹 ${this.m7Reserve}`))
+            : '地图拾取';
     }
 
     useSelectedSlot() {
-        if (this.selectedSlot === 2) {
-            this.shoot();
-        } else if (this.selectedSlot === 4) {
+        if (this.selectedSlot === 2 || this.selectedSlot === 4 || this.selectedSlot === 5) {
             this.shoot();
         } else if (this.selectedSlot === 3) {
             this.drinkAlmondWater();
@@ -1375,27 +1633,60 @@ class BackroomsGame {
         this.showNotification('🥤 饮用了杏仁水，精神值和体力恢复！');
     }
 
+    reloadM7() {
+        if (!this.m7Owned || this.m7ReloadEnd || this.m7Magazine >= 20 || (this.m7Reserve <= 0 && !this.infiniteAmmo)) return;
+        this.m7ReloadStart = performance.now();
+        this.m7ReloadEnd = this.m7ReloadStart + 2300;
+        this.audio.stopM7Gunfire();
+        this.audio.playM7Reload();
+        this.syncWeaponUI();
+        this.showNotification('M7 换弹中…');
+        setTimeout(() => {
+            const needed = 20 - this.m7Magazine;
+            const loaded = this.infiniteAmmo ? needed : Math.min(needed, this.m7Reserve);
+            this.m7Magazine += loaded;
+            if (!this.infiniteAmmo) this.m7Reserve -= loaded;
+            this.m7ReloadEnd = 0;
+            this.syncWeaponUI();
+        }, 2300);
+    }
+
     shoot() {
         if (this.isPlayerHidden) {
             this.showNotification('躲藏时无法射击，按 [G] 离开储物柜');
             return;
         }
         const isAwm = this.selectedSlot === 4;
-        if (isAwm ? !this.awmOwned : !this.gunOwned) {
-            this.showNotification(isAwm ? '还没有 AWM，先在地图里找到它' : '还没有手枪，先找到地图里的枪');
+        const isM7 = this.selectedSlot === 5;
+        if (isAwm ? !this.awmOwned : isM7 ? !this.m7Owned : !this.gunOwned) {
+            this.showNotification(isAwm ? '还没有 AWM，先在地图里找到它' : isM7 ? '还没有 M7，先在地图里找到它' : '还没有手枪，先找到地图里的枪');
             return;
         }
+        if (isM7 && this.m7ReloadEnd) return;
         const now = performance.now();
         if (now < this.shotCooldown) return;
-        this.shotCooldown = now + (isAwm ? 900 : 320);
-        if (!this.infiniteAmmo && this.ammo <= 0) {
-            this.showNotification('弹匣空了，去找黄色弹药箱');
+        this.shotCooldown = now + (isAwm ? 900 : isM7 ? 145 : 320);
+        if (!this.infiniteAmmo && (isM7 ? this.m7Magazine <= 0 : this.ammo <= 0)) {
+            this.showNotification(isM7 ? 'M7 弹匣空了，按 [R] 换弹' : '弹药用完了，去找黄色弹药箱');
             this.audio.playClick();
             return;
         }
-        if (!this.infiniteAmmo) this.ammo--;
-        this.audio.playGunshot(isAwm);
-        this.weaponRecoil = isAwm ? 0.68 : 0.38;
+        if (!this.infiniteAmmo) {
+            if (isM7) this.m7Magazine--;
+            else this.ammo--;
+        }
+
+        // Resolve the shot through the visible crosshair before the camera kick changes its pitch.
+        this.camera.updateMatrixWorld(true);
+        this.shotRaycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+        this.shotRaycaster.far = isAwm ? 90 : isM7 ? 55 : 32;
+        const shotOrigin = this.camera.position.clone();
+        const targets = this.entities.filter(entity => !entity.isDead).map(entity => entity.sprite);
+        const hit = this.shotRaycaster.intersectObjects(targets, false)[0];
+
+        if (isM7) this.audio.playM7Shot();
+        else this.audio.playGunshot(isAwm);
+        this.weaponRecoil = isAwm ? 0.68 : isM7 ? 0.27 : 0.38;
         this.muzzleFlashTimer = isAwm ? 0.14 : 0.09;
         const shotFlash = document.getElementById('shot-flash');
         if (shotFlash) {
@@ -1403,28 +1694,23 @@ class BackroomsGame {
             void shotFlash.offsetWidth;
             shotFlash.classList.add('show');
         }
-        const flash = isAwm ? this.awmViewModel.userData.muzzleFlash : this.pistolViewModel.userData.muzzleFlash;
+        const flash = isAwm ? this.awmViewModel.userData.muzzleFlash : isM7 ? this.m7ViewModel.userData.muzzleFlash : this.pistolViewModel.userData.muzzleFlash;
         if (flash) flash.visible = true;
         const crosshair = document.querySelector('.crosshair');
         if (crosshair) crosshair.classList.add('firing');
         clearTimeout(this.crosshairFireTimeout);
         this.crosshairFireTimeout = setTimeout(() => crosshair && crosshair.classList.remove('firing'), 110);
-        this.recoilPitch = Math.min(0.22, this.recoilPitch + (isAwm ? 0.09 : 0.045));
-        this.camera.rotation.x = Math.max(-Math.PI / 2.2, this.camera.rotation.x - (isAwm ? 0.09 : 0.045));
-        for (const entity of this.entities) entity.hearGunshot(this.camera.position, 36);
-
-        this.camera.updateMatrixWorld(true);
-        this.shotRaycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
-        this.shotRaycaster.far = isAwm ? 90 : 32;
-        const targets = this.entities.filter(entity => !entity.isDead).map(entity => entity.sprite);
-        const hit = this.shotRaycaster.intersectObjects(targets, false)[0];
+        const kick = isAwm ? 0.09 : isM7 ? 0.023 : 0.045;
+        this.recoilPitch = Math.min(0.22, this.recoilPitch + kick);
+        this.camera.rotation.x = Math.max(-Math.PI / 2.2, this.camera.rotation.x - kick);
+        for (const entity of this.entities) entity.hearGunshot(shotOrigin, 36);
         if (hit) {
             const entity = this.entities.find(candidate => candidate.sprite === hit.object);
-            if (entity && this.map.hasClearShot(this.camera.position, hit.point)) {
+            if (entity && this.map.hasClearShot(shotOrigin, hit.point)) {
                 if (crosshair) crosshair.classList.add('hit');
                 clearTimeout(this.hitMarkerTimeout);
                 this.hitMarkerTimeout = setTimeout(() => crosshair && crosshair.classList.remove('hit'), 180);
-                const killed = entity.takeDamage(isAwm ? entity.maxHealth : 1, this.camera.position);
+                const killed = entity.takeDamage(isAwm ? entity.maxHealth : isM7 ? 3 : 10, shotOrigin);
                 this.audio.playHitConfirm(killed);
                 if (killed) {
                     this.smilersDefeated++;
@@ -1524,20 +1810,22 @@ class BackroomsGame {
                 } else if (item.type === 'gun') {
                     this.gunOwned = true;
                     this.ammo = Math.max(this.ammo, 10);
-                    this.selectedSlot = 2;
-                    this.pistolViewModel.visible = true;
-                    this.awmViewModel.visible = false;
+                    this.selectSlot(2);
                     this.showNotification('🔫 捡到手枪！按 [2] 装备，左键射击；枪声会引来附近 Smiler');
                 } else if (item.type === 'awm') {
                     this.awmOwned = true;
                     this.ammo = Math.max(this.ammo, 5);
-                    this.selectedSlot = 4;
-                    this.pistolViewModel.visible = false;
-                    this.awmViewModel.visible = true;
+                    this.selectSlot(4);
                     this.showNotification('🎯 捡到 AWM！按 [4] 装备，右键开镜，一枪击倒 Smiler');
+                } else if (item.type === 'm7') {
+                    this.m7Owned = true;
+                    this.m7Reserve = Math.max(this.m7Reserve, 40);
+                    this.selectSlot(5);
+                    this.showNotification('🔫 捡到 M7！按 [5] 装备，按住左键射击，R 换弹；10 发击倒 Smiler');
                 } else if (item.type === 'ammo') {
                     this.ammo = Math.min(90, this.ammo + 8);
-                    this.showNotification(`🟨 弹药 +8 · 当前 ${this.ammo}`);
+                    this.m7Reserve = Math.min(160, this.m7Reserve + 20);
+                    this.showNotification(`🟨 手枪/AWM 弹药 +8 · M7 备弹 +20`);
                 }
                 this.syncWeaponUI();
                 break;
@@ -1584,8 +1872,10 @@ class BackroomsGame {
         if (!this.isRunning || this.isGameOver || this.isVictory) return;
         this.camera.position.x -= this.appliedPeekX;
         this.camera.position.z -= this.appliedPeekZ;
+        this.camera.position.y -= this.appliedPeekY;
         this.appliedPeekX = 0;
         this.appliedPeekZ = 0;
+        this.appliedPeekY = 0;
         if (this.isPlayerHidden) {
             this.peekOffset = 0;
             this.isSprinting = false;
@@ -1643,7 +1933,8 @@ class BackroomsGame {
         if (!isMoving) desiredWorldDir.set(-Math.sin(yaw), 0, -Math.cos(yaw));
         desiredWorldDir.normalize();
 
-        if (slidePressed && crouchDown && wantsSprint && isMoving && this.isGrounded && !this.canFly && !this.isSliding && this.slideCooldown <= 0) {
+        if (slidePressed && crouchDown && wantsSprint && isMoving && this.isGrounded && !this.canFly && !this.isSliding
+            && this.slideCooldown <= 0 && (this.infiniteStamina || this.stamina >= 12)) {
             this.isSliding = true;
             this.isCrouching = false;
             this.slideTimer = 0.72;
@@ -1651,6 +1942,7 @@ class BackroomsGame {
             this.slideJumpGrace = 0;
             this.slideDirection.copy(desiredWorldDir);
             this.sprintLatched = false;
+            if (!this.infiniteStamina) this.stamina = Math.max(0, this.stamina - 12);
             this.audio.playSlide();
         }
 
@@ -1669,7 +1961,7 @@ class BackroomsGame {
             this.camera.position.z += this.slideDirection.z * this.slideSpeed * delta;
             if (!this.noClip) this.map.collideAndSlide(this.camera.position, 0.45);
             this.isSprinting = true;
-            this.stamina = Math.max(0, this.stamina - delta * 5);
+            if (!this.infiniteStamina) this.stamina = Math.max(0, this.stamina - delta * 14);
             this.headBobOffset = THREE.MathUtils.lerp(this.headBobOffset, 0, Math.min(1, delta * 12));
             this.slideTimer -= delta;
             const slideBlocked = Math.hypot(this.camera.position.x - beforeSlideX, this.camera.position.z - beforeSlideZ) < this.slideSpeed * delta * 0.25;
@@ -1700,7 +1992,7 @@ class BackroomsGame {
                 this.audio.playFootstep(this.isSprinting);
             }
 
-            this.headBobOffset = Math.sin(this.headBobTimer) * bobAmplitude;
+            this.headBobOffset = this.comfortMode ? 0 : Math.sin(this.headBobTimer) * bobAmplitude;
 
             // Transform movement direction relative to camera yaw
             const dx = (moveDir.x * Math.cos(yaw) + moveDir.z * Math.sin(yaw)) * moveSpeed * delta;
@@ -1733,20 +2025,28 @@ class BackroomsGame {
         this.peekOffset = THREE.MathUtils.lerp(this.peekOffset, peekInput * 0.95, Math.min(1, delta * 13));
         const baseX = this.camera.position.x;
         const baseZ = this.camera.position.z;
-        this.camera.position.x += Math.cos(yaw) * this.peekOffset;
-        this.camera.position.z -= Math.sin(yaw) * this.peekOffset;
+        const desiredPeekX = Math.cos(yaw) * this.peekOffset;
+        const desiredPeekZ = -Math.sin(yaw) * this.peekOffset;
+        const peekFraction = this.noClip ? 1 : this.map.clampPeekOffset(baseX, baseZ, desiredPeekX, desiredPeekZ, this.camera.position.y);
+        this.camera.position.x += desiredPeekX * peekFraction;
+        this.camera.position.z += desiredPeekZ * peekFraction;
         // Peeking moves only the viewpoint; body collision has already been resolved above.
         this.appliedPeekX = this.camera.position.x - baseX;
         this.appliedPeekZ = this.camera.position.z - baseZ;
-        this.camera.rotation.z = THREE.MathUtils.lerp(this.camera.rotation.z, -this.peekOffset * 0.17, Math.min(1, delta * 10));
+        this.camera.rotation.z = THREE.MathUtils.lerp(this.camera.rotation.z,
+            -this.peekOffset * peekFraction * (this.comfortMode ? 0.12 : 0.17), Math.min(1, delta * 10));
 
         const recoilRecovery = Math.min(this.recoilPitch, delta * 0.16);
         this.camera.rotation.x = Math.min(Math.PI / 2.2, this.camera.rotation.x + recoilRecovery);
         this.recoilPitch -= recoilRecovery;
 
-        const targetFov = this.isAiming && this.selectedSlot === 4 && this.awmOwned ? 20 : (this.isAiming ? 43 : (this.isSliding ? 80 : 75));
+        const targetFov = this.isAiming && this.selectedSlot === 4 && this.awmOwned ? 20
+            : this.isAiming && this.selectedSlot === 5 && this.m7Owned ? (this.comfortMode ? 68 : 62)
+            : this.isAiming ? (this.comfortMode ? 60 : 43)
+            : (this.isSliding && !this.comfortMode ? 80 : 75);
         document.body.classList.toggle('aiming', this.isAiming);
         document.body.classList.toggle('awm-equipped', this.isAiming && this.selectedSlot === 4 && this.awmOwned);
+        document.body.classList.toggle('m7-aiming', this.isAiming && this.selectedSlot === 5 && this.m7Owned);
         const nextFov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, delta * 10));
         if (Math.abs(nextFov - this.camera.fov) > 0.05) {
             this.camera.fov = nextFov;
@@ -1754,12 +2054,29 @@ class BackroomsGame {
         }
         this.weaponRecoil = Math.max(0, this.weaponRecoil - delta * 1.55);
         this.muzzleFlashTimer = Math.max(0, this.muzzleFlashTimer - delta);
-        const activeWeapon = this.selectedSlot === 4 ? this.awmViewModel : this.pistolViewModel;
+        const reloadProgress = this.m7ReloadEnd ? THREE.MathUtils.clamp((performance.now() - this.m7ReloadStart) / 2300, 0, 1) : 0;
+        const magazinePull = this.m7ReloadEnd
+            ? (reloadProgress < 0.35 ? reloadProgress / 0.35 : reloadProgress < 0.65 ? 1 : (1 - reloadProgress) / 0.35)
+            : 0;
+        const reloadArc = this.m7ReloadEnd ? Math.sin(Math.PI * reloadProgress) : 0;
+        this.m7ViewModel.userData.magazine.position.y = -0.26 - magazinePull * 0.38;
+        if (this.m7ViewModel.userData.reloadHand) {
+            this.m7ViewModel.userData.reloadHand.position.set(magazinePull * 0.18, -magazinePull * 0.28, -magazinePull * 0.18);
+        }
+        const activeWeapon = this.selectedSlot === 4 ? this.awmViewModel : this.selectedSlot === 5 ? this.m7ViewModel : this.pistolViewModel;
         if (activeWeapon) {
             const flash = activeWeapon.userData.muzzleFlash;
             if (flash) flash.visible = this.muzzleFlashTimer > 0;
-            activeWeapon.position.z = THREE.MathUtils.lerp(activeWeapon.position.z, (this.isAiming ? -0.54 : -0.68) + this.weaponRecoil * 0.35, Math.min(1, delta * 18));
-            activeWeapon.rotation.x = THREE.MathUtils.lerp(activeWeapon.rotation.x, this.weaponRecoil * (this.selectedSlot === 4 ? 0.22 : 0.3), Math.min(1, delta * 22));
+            const restZ = this.selectedSlot === 5 ? -1.1 : -0.68;
+            activeWeapon.position.z = THREE.MathUtils.lerp(activeWeapon.position.z, (this.isAiming ? restZ + 0.14 : restZ) + this.weaponRecoil * 0.35, Math.min(1, delta * 18));
+            activeWeapon.rotation.x = THREE.MathUtils.lerp(activeWeapon.rotation.x,
+                this.weaponRecoil * (this.selectedSlot === 4 ? 0.22 : 0.3) + (this.selectedSlot === 5 ? reloadArc * 0.22 : 0), Math.min(1, delta * 22));
+            if (this.selectedSlot === 5) {
+                activeWeapon.position.x = THREE.MathUtils.lerp(activeWeapon.position.x, this.isAiming ? 0 : 0.37, Math.min(1, delta * 16));
+                activeWeapon.position.y = THREE.MathUtils.lerp(activeWeapon.position.y, (this.isAiming ? -0.29 : -0.22) - reloadArc * 0.1, Math.min(1, delta * 16));
+                activeWeapon.rotation.y = THREE.MathUtils.lerp(activeWeapon.rotation.y, this.isAiming ? 0 : 0.28, Math.min(1, delta * 16));
+                activeWeapon.rotation.z = THREE.MathUtils.lerp(activeWeapon.rotation.z, reloadArc * 0.14, Math.min(1, delta * 16));
+            }
         }
 
         if (this.canFly) {
@@ -1781,10 +2098,12 @@ class BackroomsGame {
                 this.slideJumpMomentum.set(0, 0, 0);
             }
         }
-        const airBob = this.isGrounded ? this.headBobOffset : Math.sin(this.headBobTimer) * 0.012;
+        const airBob = this.comfortMode ? 0 : (this.isGrounded ? this.headBobOffset : Math.sin(this.headBobTimer) * 0.012);
         const targetEyeHeight = this.isSliding ? 0.82 : (this.isCrouching ? 1.12 : 1.7);
         this.currentEyeHeight = THREE.MathUtils.lerp(this.currentEyeHeight, targetEyeHeight, Math.min(1, delta * 12));
         if (!this.canFly) this.camera.position.y = this.currentEyeHeight + this.jumpHeight + airBob;
+        this.appliedPeekY = Math.abs(this.peekOffset * peekFraction) * 0.2;
+        this.camera.position.y += this.appliedPeekY;
         if (this.infiniteStamina) this.stamina = this.staminaMax;
         if (this.isInvincible) {
             this.sanity = 100;
@@ -1803,6 +2122,17 @@ class BackroomsGame {
         // Sanity logic: drops in darkness or near entity
         let darkFactor = (!this.flashlightOn) ? 1.4 : 0.2;
         if (!this.isInvincible) this.sanity = Math.max(0, this.sanity - delta * 0.45 * darkFactor);
+        const manila = this.map.manilaRoom;
+        const manilaWorld = this.map.gridToWorld(manila.x, manila.z);
+        const inManilaRoom = Math.hypot(this.camera.position.x - manilaWorld.x, this.camera.position.z - manilaWorld.z) < 5.8;
+        if (inManilaRoom) {
+            this.sanity = Math.min(100, this.sanity + delta * 0.85);
+            if (!this.isSprinting && !this.isSliding) this.stamina = Math.min(this.staminaMax, this.stamina + delta * 5);
+            if (!this.manilaHintShown) {
+                this.showNotification('马尼拉房间：较暗的橙色灯光让人暂时平静，理智与体力缓慢恢复');
+                this.manilaHintShown = true;
+            }
+        }
 
         // Heartbeat when low sanity
         if (this.sanity < 40) {
@@ -1815,6 +2145,7 @@ class BackroomsGame {
         if (this.sanity <= 0 && !this.isInvincible) {
             this.triggerGameOver('理智耗尽，陷入后室深渊...');
         }
+        if (this.isRunning && this.isLeftMouseHeld && this.selectedSlot === 5) this.shoot();
     }
 
     updateLights(delta) {
@@ -1826,6 +2157,10 @@ class BackroomsGame {
 
         this.lightMeshes.forEach(item => {
             if (item.state === 'flicker') {
+                if (this.comfortMode) {
+                    item.light.intensity = item.baseIntensity * 0.9;
+                    return;
+                }
                 const noise = Math.sin(Date.now() * 0.015 + item.flickerSeed);
                 if (noise > 0.75) {
                     item.light.intensity = 0.05 + Math.random() * 0.2;
@@ -1859,11 +2194,11 @@ class BackroomsGame {
             item.state = candidate.state;
             item.flickerSeed = candidate.x * 13 + candidate.z * 7;
             const tint = this.visualNoise(candidate.x, candidate.z, 81);
-            const lightColor = candidate.state === 'flicker'
+            const lightColor = candidate.state === 'manila' ? 0xffb66e : candidate.state === 'flicker'
                 ? (tint > 0.5 ? 0xffe0a3 : 0xdce9ff)
                 : (tint > 0.82 ? 0xffe9bd : 0xfff6cf);
             item.light.color.setHex(lightColor);
-            item.light.intensity = item.baseIntensity;
+            item.light.intensity = item.baseIntensity * (candidate.state === 'manila' ? 0.62 : 1);
         });
     }
 

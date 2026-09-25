@@ -15,7 +15,8 @@ class BackroomsEntity {
         this.speed = 2.4;
         this.chaseSpeed = 4.8;
         this.state = 'PATROL'; // PATROL, INVESTIGATE, CHASE
-        this.maxHealth = 3;
+        // Whole-number units keep the pistol at three hits and the M7 at ten.
+        this.maxHealth = 30;
         this.health = this.maxHealth;
         this.isDead = false;
         this.respawnTimer = 0;
@@ -68,6 +69,14 @@ class BackroomsEntity {
         }
         this.slowTimer = Math.max(0, this.slowTimer - delta);
         let distToPlayer = this.position.distanceTo(playerPos);
+        const manilaWorld = this.map.gridToWorld(this.map.manilaRoom.x, this.map.manilaRoom.z);
+        const playerInManila = Math.hypot(playerPos.x - manilaWorld.x, playerPos.z - manilaWorld.z) < 5.8;
+        if (playerInManila && this.state !== 'PATROL') {
+            this.state = 'PATROL';
+            this.investigateTarget = null;
+            this.pathWaypoint = null;
+            this.chooseNewPatrolTarget();
+        }
 
         // State Machine
         this.stateTimer += delta;
@@ -78,7 +87,9 @@ class BackroomsEntity {
         // 2. Direct line-of-sight / proximity within 10m triggers chase
         const hearingDist = isPlayerSprinting ? 18.0 : 7.0;
         const canHearPlayer = distToPlayer < hearingDist;
-        if (isPlayerHidden && this.state === 'CHASE') {
+        if (playerInManila) {
+            // The quiet pocket is a short refuge from the hunting loop.
+        } else if (isPlayerHidden && this.state === 'CHASE') {
             this.state = 'INVESTIGATE';
             this.investigateTarget = playerPos.clone();
             this.pathWaypoint = null;
@@ -119,7 +130,7 @@ class BackroomsEntity {
             if (this.state === 'CHASE' || this.state === 'INVESTIGATE') {
                 this.pathRepathTimer -= delta;
                 if (!this.pathWaypoint || this.pathRepathTimer <= 0 || this.position.distanceTo(this.pathWaypoint) < 0.85) {
-                    this.pathWaypoint = this.map.getChaseWaypoint(this.position, targetPos) || targetPos.clone();
+                    this.pathWaypoint = this.map.getChaseWaypoint(this.position, targetPos, true) || targetPos.clone();
                     this.pathRepathTimer = 0.35;
                 }
                 targetPos = this.pathWaypoint;
@@ -130,8 +141,16 @@ class BackroomsEntity {
                 dir.normalize();
                 const slowFactor = this.slowTimer > 0 ? 0.42 : 1;
                 this.velocity.copy(dir).multiplyScalar(currentSpeed * slowFactor * delta);
+                const previousX = this.position.x;
+                const previousZ = this.position.z;
                 this.position.add(this.velocity);
                 this.map.collideAndSlide(this.position, 0.6);
+                if (Math.hypot(this.position.x - manilaWorld.x, this.position.z - manilaWorld.z) < 6.0) {
+                    this.position.x = previousX;
+                    this.position.z = previousZ;
+                    this.pathWaypoint = null;
+                    this.chooseNewPatrolTarget();
+                }
             }
         }
 
@@ -163,7 +182,7 @@ class BackroomsEntity {
         }
 
         // Check if caught player. A locker buys a short escape window while the Smiler searches.
-        if (!isPlayerHidden && distToPlayer < 1.3) {
+        if (!isPlayerHidden && !playerInManila && distToPlayer < 1.3) {
             return 'CAUGHT';
         }
 
@@ -201,7 +220,7 @@ class BackroomsEntity {
         const previousCell = this.map.worldToGrid(this.position.x, this.position.z);
         for (let z = 1; z < this.map.height - 1; z++) {
             for (let x = 1; x < this.map.width - 1; x++) {
-                if (!this.map.isWalkable(x, z)) continue;
+                if (!this.map.isWalkable(x, z) || this.map.isManilaRoom(x, z)) continue;
                 const world = this.map.gridToWorld(x, z);
                 const fromPlayer = (world.x - playerPos.x) ** 2 + (world.z - playerPos.z) ** 2;
                 const fromPrevious = (x - previousCell.x) ** 2 + (z - previousCell.z) ** 2;
@@ -255,7 +274,7 @@ class BackroomsEntity {
         const candidates = [];
         for (let z = 1; z < this.map.height - 1; z++) {
             for (let x = 1; x < this.map.width - 1; x++) {
-                if (this.map.isWalkable(x, z)) {
+                if (this.map.isWalkable(x, z) && !this.map.isManilaRoom(x, z)) {
                     candidates.push({ x, z });
                 }
             }

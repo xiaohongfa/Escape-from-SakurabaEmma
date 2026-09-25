@@ -44,6 +44,10 @@
             z-index: 10;
             box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.85);
         }
+        body.comfort-mode .vhs-overlay { background: none; box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.35); }
+        body.comfort-mode #shot-flash { display: none; }
+        body.comfort-mode #sanity-vignette { background: radial-gradient(circle, transparent 45%, rgba(180, 20, 20, 0.3) 100%); }
+        body.comfort-mode .rec-dot { animation: none; opacity: 0.75; }
 
         /* Sanity Vignette / Danger Pulse */
         #sanity-vignette {
@@ -126,6 +130,30 @@
         #shot-flash.show { animation: shot-pulse 0.16s ease-out forwards; }
         @keyframes shot-pulse { 0% { opacity: 1; } 100% { opacity: 0; } }
         body.aiming .crosshair { opacity: 0.18; }
+        body.m7-aiming .crosshair { opacity: 0; }
+        #red-dot-overlay {
+            display: none;
+            pointer-events: none;
+            position: absolute;
+            left: 50%; top: 50%;
+            width: 54px; height: 54px;
+            transform: translate(-50%, -50%);
+            border: 1px solid rgba(98, 119, 107, 0.58);
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(90, 137, 123, 0.13), rgba(64, 105, 87, 0.04) 65%, transparent 80%);
+            z-index: 16;
+        }
+        #red-dot-overlay::after {
+            content: '';
+            position: absolute;
+            width: 5px; height: 5px;
+            left: 50%; top: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            background: #ff3232;
+            box-shadow: 0 0 5px #ff2828, 0 0 12px #d91f1f;
+        }
+        body.m7-aiming #red-dot-overlay { display: block; }
         #scope-overlay {
             display: none;
             pointer-events: none;
@@ -409,6 +437,7 @@
         }
 
         .volume-control input { width: 150px; accent-color: #e5c85f; }
+        .volume-control input[type="checkbox"] { width: auto; }
         .volume-control output { min-width: 42px; color: #fff1b2; font-variant-numeric: tabular-nums; }
 
         .settings-row { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; }
@@ -508,6 +537,7 @@
     <!-- Crosshair -->
     <div class="crosshair"></div>
     <div id="scope-overlay"></div>
+    <div id="red-dot-overlay" aria-hidden="true"></div>
 
     <!-- Dynamic In-Game Interaction Popups -->
     <div id="interaction-prompt">按 [G] 拾取</div>
@@ -519,6 +549,7 @@
         <div class="hotbar-slot" id="hotbar-slot-2"><span class="hotbar-key">2</span><span>手枪</span><span class="hotbar-detail" id="hotbar-detail-2">地图拾取</span></div>
         <div class="hotbar-slot" id="hotbar-slot-3"><span class="hotbar-key">3</span><span>杏仁水</span><span class="hotbar-detail" id="hotbar-detail-3">x1</span></div>
         <div class="hotbar-slot" id="hotbar-slot-4"><span class="hotbar-key">4</span><span>AWM</span><span class="hotbar-detail" id="hotbar-detail-4">地图拾取</span></div>
+        <div class="hotbar-slot" id="hotbar-slot-5"><span class="hotbar-key">5</span><span>M7</span><span class="hotbar-detail" id="hotbar-detail-5">地图拾取</span></div>
     </div>
 
     <!-- HUD Status -->
@@ -570,9 +601,10 @@
         <div class="instructions-card">
             <div><span class="key-tag">W / A / S / D</span> 移动走位</div>
             <div><span class="key-tag">Space</span> 跳跃；滑铲中按 Space 可衔接滑铲跳</div>
-            <div><span class="key-tag">V / Ctrl</span> 蹲下；奔跑时按下可滑铲</div>
-            <div><span class="key-tag">1 / 2 / 3 / 4</span> 切换空手、手枪、杏仁水、AWM</div>
-            <div><span class="key-tag">鼠标左键</span> 射击 / 使用杏仁水；R 切换瞄准，右键也可按住瞄准</div>
+            <div><span class="key-tag">V / Ctrl</span> 蹲下；奔跑时按下可滑铲（消耗体力）</div>
+            <div><span class="key-tag">1 / 2 / 3 / 4 / 5</span> 切换空手、手枪、杏仁水、AWM、M7</div>
+            <div><span class="key-tag">鼠标左键</span> 射击 / 使用杏仁水；M7 可按住连射，R 换弹</div>
+            <div><span class="key-tag">鼠标右键</span> 按住瞄准；M7 使用红点瞄具，手枪和 AWM 也可按 R 切换瞄准</div>
             <div><span class="key-tag">鼠标滑动</span> 观察环顾四周</div>
             <div><span class="key-tag">按住 Q / E</span> 左 / 右探头，松开复位</div>
             <div><span class="key-tag">Shift</span> 起跑；松开 Shift 后继续跑，松开方向键停止</div>
@@ -591,6 +623,7 @@
             <label class="volume-control">帧率上限
                 <select class="fps-select" aria-label="帧率上限"><option>30</option><option selected>45</option><option>60</option><option>90</option><option>120</option></select> FPS
             </label>
+            <label class="volume-control"><input class="comfort-mode-checkbox" type="checkbox" checked> 舒适画面（减少晃动与闪烁）</label>
         </div>
         <div class="death-preview">试听死亡音效：<button type="button" data-death-preview="0">饿啊 ①</button><button type="button" data-death-preview="1">饿啊 ②</button></div>
 
@@ -609,6 +642,7 @@
             <label class="volume-control">帧率上限
                 <select class="fps-select" aria-label="帧率上限"><option>30</option><option>45</option><option>60</option><option>90</option><option>120</option></select> FPS
             </label>
+            <label class="volume-control"><input class="comfort-mode-checkbox" type="checkbox" checked> 舒适画面（减少晃动与闪烁）</label>
         </div>
         <div class="death-preview">试听死亡音效：<button type="button" data-death-preview="0">饿啊 ①</button><button type="button" data-death-preview="1">饿啊 ②</button></div>
         <button class="action-btn" onclick="window.game.resumeFromPause()">继续探索</button>
