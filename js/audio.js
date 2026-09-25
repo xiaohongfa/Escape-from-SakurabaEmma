@@ -13,9 +13,14 @@ class BackroomsAudio {
         this.barkVolume = 1.4;
         this.deathCallClips = null;
         this.m7ReloadBuffer = null;
+        this.m7BurstBuffer = null;
         this.m7ShotBuffers = {};
         this.m7ActiveShots = new Set();
+        this.m7Burst = null;
+        this.m7ShotCount = 0;
+        this.m7LastShotAt = -Infinity;
         this.m7PreviewClip = null;
+        this.slideVoice = null;
         this.m7ShotVariant = 'a';
         try {
             const saved = localStorage.getItem('m7ShotVariant');
@@ -48,6 +53,7 @@ class BackroomsAudio {
 
     suspend() {
         this.stopM7Gunfire();
+        this.stopSlide();
         if (this.ctx && this.ctx.state === 'running') this.ctx.suspend();
     }
 
@@ -228,6 +234,11 @@ class BackroomsAudio {
                 .then(buffer => { this.m7ShotBuffers[variant] = buffer; })
                 .catch(error => console.error(`M7 shot ${variant} could not be decoded`, error));
         }
+        fetch(assets.m7_burst || 'assets/audio/m7-burst.wav')
+            .then(response => response.arrayBuffer())
+            .then(data => this.ctx.decodeAudioData(data))
+            .then(buffer => { this.m7BurstBuffer = buffer; })
+            .catch(error => console.error('M7 burst audio could not be decoded', error));
         fetch(assets.m7_reload || 'assets/audio/m7-reload.wav')
             .then(response => response.arrayBuffer())
             .then(data => this.ctx.decodeAudioData(data))
@@ -248,7 +259,7 @@ class BackroomsAudio {
             source.onended = () => this.m7ActiveShots.delete(source);
         }
         source.start();
-        return true;
+        return { source, gain };
     }
 
     setM7ShotVariant(variant) {
@@ -260,7 +271,10 @@ class BackroomsAudio {
     playM7Preview(variant) {
         if (this.m7PreviewClip) this.m7PreviewClip.pause();
         const assets = window.GAME_ASSETS || {};
-        const clip = new Audio(assets[`m7_shot_${variant}`] || `assets/audio/m7-shot-${variant}.wav`);
+        const source = variant === 'burst'
+            ? (assets.m7_burst || 'assets/audio/m7-burst.wav')
+            : (assets[`m7_shot_${variant}`] || `assets/audio/m7-shot-${variant}.wav`);
+        const clip = new Audio(source);
         clip.volume = 0.62;
         this.m7PreviewClip = clip;
         clip.play().catch(error => console.warn('M7 preview could not play', error));
@@ -268,12 +282,57 @@ class BackroomsAudio {
 
     playM7Shot() {
         if (this.isMuted) return;
+        const now = this.ctx?.currentTime ?? 0;
+        if (now - this.m7LastShotAt > 0.19) this.endM7Burst();
+        this.m7LastShotAt = now;
+        this.m7ShotCount++;
+        if (this.m7ShotCount === 2 && this.m7BurstBuffer) {
+            // Fade the tap sample before its next transient, then continue from
+            // the matching point in the unmodified source recording.
+            for (const voice of this.m7ActiveShots) {
+                if (voice._m7Gain) {
+                    voice._m7Gain.gain.setTargetAtTime(0, now, 0.006);
+                    try { voice.stop(now + 0.025); } catch (_) {}
+                }
+            }
+            const source = this.ctx.createBufferSource();
+            const gain = this.ctx.createGain();
+            source.buffer = this.m7BurstBuffer;
+            gain.gain.setValueAtTime(0.78, now);
+            source.connect(gain);
+            gain.connect(this.masterGain);
+            source.start(now, 0.09);
+            this.m7Burst = { source, gain };
+            source.onended = () => { if (this.m7Burst?.source === source) this.m7Burst = null; };
+            return;
+        }
+        if (this.m7Burst) return;
         const buffer = this.m7ShotBuffers[this.m7ShotVariant];
-        if (this.playM7Clip(buffer, 0.78, true)) return;
+        const voice = this.playM7Clip(buffer, 0.78, true);
+        if (voice) {
+            voice.source._m7Gain = voice.gain;
+            return;
+        }
         this.playM7Preview(this.m7ShotVariant);
     }
 
+    endM7Burst(delay = 0) {
+        this.m7ShotCount = 0;
+        if (!this.ctx || !this.m7Burst) return;
+        const { source, gain } = this.m7Burst;
+        this.m7Burst = null;
+        const now = this.ctx.currentTime + delay;
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.setTargetAtTime(0, now, 0.025);
+        try { source.stop(now + 0.12); } catch (_) {}
+    }
+
     stopM7Gunfire() {
+        if (this.m7Burst) {
+            try { this.m7Burst.source.stop(); } catch (_) {}
+            this.m7Burst = null;
+        }
+        this.m7ShotCount = 0;
         for (const source of this.m7ActiveShots) {
             try { source.stop(); } catch (_) {}
         }
@@ -303,27 +362,64 @@ class BackroomsAudio {
 
     playSlide() {
         if (!this.ctx || this.isMuted) return;
+        this.stopSlide();
         const now = this.ctx.currentTime;
-        const duration = 0.55;
-        const length = Math.floor(this.ctx.sampleRate * duration);
+        const length = Math.floor(this.ctx.sampleRate * 0.4);
         const buffer = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
         const data = buffer.getChannelData(0);
-        for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * Math.sin(Math.PI * i / length);
+        let grain = 0;
+        for (let i = 0; i < length; i++) {
+            grain = grain * 0.82 + (Math.random() * 2 - 1) * 0.18;
+            data[i] = grain * Math.sin(Math.PI * i / length);
+        }
         const source = this.ctx.createBufferSource();
         const filter = this.ctx.createBiquadFilter();
         const gain = this.ctx.createGain();
         source.buffer = buffer;
+        source.loop = true;
         filter.type = 'bandpass';
-        filter.frequency.setValueAtTime(520, now);
-        filter.frequency.linearRampToValueAtTime(220, now + duration);
-        filter.Q.value = 0.7;
-        gain.gain.setValueAtTime(0.24, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+        filter.frequency.setValueAtTime(640, now);
+        filter.Q.value = 0.55;
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.setTargetAtTime(0.34, now, 0.025);
         source.connect(filter);
         filter.connect(gain);
         gain.connect(this.masterGain);
         source.start(now);
-        source.stop(now + duration);
+        this.slideVoice = { source, filter, gain };
+        const impact = this.ctx.createOscillator();
+        const impactGain = this.ctx.createGain();
+        impact.type = 'sine';
+        impact.frequency.setValueAtTime(95, now);
+        impact.frequency.exponentialRampToValueAtTime(48, now + 0.09);
+        impactGain.gain.setValueAtTime(0.23, now);
+        impactGain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+        impact.connect(impactGain);
+        impactGain.connect(this.masterGain);
+        impact.start(now);
+        impact.stop(now + 0.12);
+        source.onended = () => {
+            source.disconnect();
+            filter.disconnect();
+            gain.disconnect();
+        };
+    }
+
+    updateSlide(speed) {
+        if (!this.slideVoice || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        const intensity = Math.max(0, Math.min(1, (speed - 3.4) / 7.9));
+        this.slideVoice.filter.frequency.setTargetAtTime(380 + intensity * 500, now, 0.05);
+        this.slideVoice.gain.gain.setTargetAtTime(0.11 + intensity * 0.27, now, 0.05);
+    }
+
+    stopSlide() {
+        if (!this.slideVoice || !this.ctx) return;
+        const { source, gain } = this.slideVoice;
+        this.slideVoice = null;
+        const now = this.ctx.currentTime;
+        gain.gain.setTargetAtTime(0, now, 0.018);
+        try { source.stop(now + 0.09); } catch (_) {}
     }
 
     /** Decode once; each nearby Smiler gets its own spatial loop and panner. */

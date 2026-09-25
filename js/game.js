@@ -48,6 +48,7 @@ class BackroomsGame {
         this.ammo = 0;
         this.selectedSlot = 1;
         this.shotCooldown = 0;
+        this.lastM7ShotAt = -Infinity;
         this.smilersDefeated = 0;
         this.isPlayerHidden = false;
         this.isAiming = false;
@@ -1333,7 +1334,10 @@ class BackroomsGame {
             }
         });
         document.addEventListener('mouseup', (e) => {
-            if (e.button === 0) this.isLeftMouseHeld = false;
+            if (e.button === 0) {
+                this.isLeftMouseHeld = false;
+                this.audio.endM7Burst();
+            }
             if (e.button === 2) {
                 this.isRightMouseHeld = false;
                 this.isAiming = this.isAimToggled;
@@ -1650,6 +1654,7 @@ class BackroomsGame {
             this.isRightMouseHeld = false;
             this.isAiming = false;
         }
+        if (this.selectedSlot === 5 && slot !== 5) this.audio.endM7Burst();
         this.selectedSlot = slot;
         this.pistolViewModel.visible = this.gunOwned && slot === 2;
         this.awmViewModel.visible = this.awmOwned && slot === 4;
@@ -1734,7 +1739,17 @@ class BackroomsGame {
         if (isM7 && this.m7ReloadEnd) return;
         const now = performance.now();
         if (now < this.shotCooldown) return;
-        this.shotCooldown = now + (isAwm ? 900 : isM7 ? 145 : 320);
+        if (isM7) {
+            // Carry the original cadence across render frames. Restarting a 90 ms
+            // timer on every frame-quantized shot made 45 FPS behave like 112 ms.
+            const continuingBurst = now - this.lastM7ShotAt < 200;
+            this.shotCooldown = continuingBurst
+                ? Math.max(now + 8, this.shotCooldown + 90)
+                : now + 90;
+        } else {
+            this.lastM7ShotAt = -Infinity;
+            this.shotCooldown = now + (isAwm ? 900 : 320);
+        }
         if (!this.infiniteAmmo && (isM7 ? this.m7Magazine <= 0 : this.ammo <= 0)) {
             this.showNotification(isM7 ? 'M7 弹匣空了，按 [R] 换弹' : '弹药用完了，去找黄色弹药箱');
             this.audio.playClick();
@@ -1744,6 +1759,7 @@ class BackroomsGame {
             if (isM7) this.m7Magazine--;
             else this.ammo--;
         }
+        if (isM7) this.lastM7ShotAt = now;
 
         // Resolve the shot through the visible crosshair before the camera kick changes its pitch.
         this.camera.updateMatrixWorld(true);
@@ -1753,7 +1769,10 @@ class BackroomsGame {
         const targets = this.entities.filter(entity => !entity.isDead).map(entity => entity.sprite);
         const hit = this.shotRaycaster.intersectObjects(targets, false)[0];
 
-        if (isM7) this.audio.playM7Shot();
+        if (isM7) {
+            this.audio.playM7Shot();
+            if (!this.infiniteAmmo && this.m7Magazine === 0) this.audio.endM7Burst(0.09);
+        }
         else this.audio.playGunshot(isAwm);
         this.weaponRecoil = isAwm ? 0.68 : isM7 ? 0.27 : 0.38;
         this.muzzleFlashTimer = isAwm ? 0.14 : 0.09;
@@ -1811,6 +1830,7 @@ class BackroomsGame {
         if (canSlideJump) {
             this.slideJumpMomentum.copy(this.slideDirection).multiplyScalar(Math.max(4.8, this.slideSpeed * 0.9));
             this.isSliding = false;
+            this.audio.stopSlide();
             this.slideTimer = 0;
             this.slideJumpGrace = 0;
             this.slideCooldown = 0.35;
@@ -2024,6 +2044,7 @@ class BackroomsGame {
             this.slideDirection.set(-Math.sin(turnedYaw), 0, -Math.cos(turnedYaw));
             const slideProgress = Math.max(0, this.slideTimer / 0.72);
             this.slideSpeed = 3.4 + 7.9 * slideProgress * slideProgress;
+            this.audio.updateSlide(this.slideSpeed);
             const beforeSlideX = this.camera.position.x;
             const beforeSlideZ = this.camera.position.z;
             this.camera.position.x += this.slideDirection.x * this.slideSpeed * delta;
@@ -2037,6 +2058,7 @@ class BackroomsGame {
             if (slideBlocked) this.slideTimer = 0;
             if (this.slideTimer <= 0) {
                 this.isSliding = false;
+                this.audio.stopSlide();
                 this.slideCooldown = 0.48;
                 this.slideJumpGrace = slideBlocked ? 0 : 0.14;
             }
