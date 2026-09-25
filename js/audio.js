@@ -13,8 +13,14 @@ class BackroomsAudio {
         this.barkVolume = 1.4;
         this.deathCallClips = null;
         this.m7ReloadBuffer = null;
-        this.m7OriginalClip = null;
-        this.m7GunStopTimer = null;
+        this.m7ShotBuffers = {};
+        this.m7ActiveShots = new Set();
+        this.m7PreviewClip = null;
+        this.m7ShotVariant = 'a';
+        try {
+            const saved = localStorage.getItem('m7ShotVariant');
+            if (['a', 'b', 'c'].includes(saved)) this.m7ShotVariant = saved;
+        } catch (_) {}
         this.smilerBarks = new Map();
         this.heartbeatInterval = null;
         this.lastStepTime = 0;
@@ -215,10 +221,13 @@ class BackroomsAudio {
 
     loadM7Audio() {
         const assets = window.GAME_ASSETS || {};
-        this.m7OriginalClip = new Audio(assets.m7_original || 'assets/audio/m7-original.m4a');
-        this.m7OriginalClip.preload = 'auto';
-        this.m7OriginalClip.volume = 0.62;
-        this.m7OriginalClip.load();
+        for (const variant of ['a', 'b', 'c']) {
+            fetch(assets[`m7_shot_${variant}`] || `assets/audio/m7-shot-${variant}.wav`)
+                .then(response => response.arrayBuffer())
+                .then(data => this.ctx.decodeAudioData(data))
+                .then(buffer => { this.m7ShotBuffers[variant] = buffer; })
+                .catch(error => console.error(`M7 shot ${variant} could not be decoded`, error));
+        }
         fetch(assets.m7_reload || 'assets/audio/m7-reload.wav')
             .then(response => response.arrayBuffer())
             .then(data => this.ctx.decodeAudioData(data))
@@ -226,7 +235,7 @@ class BackroomsAudio {
             .catch(error => console.error('M7 reload audio could not be decoded', error));
     }
 
-    playM7Clip(buffer, volume) {
+    playM7Clip(buffer, volume, trackShot = false) {
         if (!this.ctx || this.isMuted || !buffer) return false;
         const source = this.ctx.createBufferSource();
         const gain = this.ctx.createGain();
@@ -234,25 +243,42 @@ class BackroomsAudio {
         gain.gain.value = volume;
         source.connect(gain);
         gain.connect(this.masterGain);
+        if (trackShot) {
+            this.m7ActiveShots.add(source);
+            source.onended = () => this.m7ActiveShots.delete(source);
+        }
         source.start();
         return true;
     }
 
+    setM7ShotVariant(variant) {
+        if (!['a', 'b', 'c'].includes(variant)) return;
+        this.m7ShotVariant = variant;
+        try { localStorage.setItem('m7ShotVariant', variant); } catch (_) {}
+    }
+
+    playM7Preview(variant) {
+        if (this.m7PreviewClip) this.m7PreviewClip.pause();
+        const assets = window.GAME_ASSETS || {};
+        const clip = new Audio(assets[`m7_shot_${variant}`] || `assets/audio/m7-shot-${variant}.wav`);
+        clip.volume = 0.62;
+        this.m7PreviewClip = clip;
+        clip.play().catch(error => console.warn('M7 preview could not play', error));
+    }
+
     playM7Shot() {
-        if (this.isMuted || !this.m7OriginalClip) return;
-        clearTimeout(this.m7GunStopTimer);
-        if (this.m7OriginalClip.paused || this.m7OriginalClip.ended) {
-            this.m7OriginalClip.currentTime = 0;
-            this.m7OriginalClip.play().catch(error => console.warn('M7 original audio could not play', error));
-        }
-        this.m7GunStopTimer = setTimeout(() => this.stopM7Gunfire(), 900);
+        if (this.isMuted) return;
+        const buffer = this.m7ShotBuffers[this.m7ShotVariant];
+        if (this.playM7Clip(buffer, 0.78, true)) return;
+        this.playM7Preview(this.m7ShotVariant);
     }
 
     stopM7Gunfire() {
-        clearTimeout(this.m7GunStopTimer);
-        if (!this.m7OriginalClip) return;
-        this.m7OriginalClip.pause();
-        try { this.m7OriginalClip.currentTime = 0; } catch (_) {}
+        for (const source of this.m7ActiveShots) {
+            try { source.stop(); } catch (_) {}
+        }
+        this.m7ActiveShots.clear();
+        if (this.m7PreviewClip) this.m7PreviewClip.pause();
     }
 
     playM7Reload() {

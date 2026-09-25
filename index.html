@@ -462,6 +462,9 @@
         .fps-select { background: #241f12; color: #fff1b2; border: 1px solid #9d8345; padding: 6px; border-radius: 4px; }
         .death-preview { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 13px; }
         .death-preview button { color: #fff1b2; background: #332719; border: 1px solid #a78a4e; border-radius: 4px; padding: 5px 8px; cursor: pointer; }
+        .m7-audio-choices { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; color: #e1d4a5; font-size: 13px; }
+        .m7-audio-choices button { color: #fff1b2; background: #332719; border: 1px solid #a78a4e; border-radius: 4px; padding: 5px 8px; cursor: pointer; }
+        .m7-audio-choices select { background: #241f12; color: #fff1b2; border: 1px solid #9d8345; padding: 5px; border-radius: 4px; }
 
         #cheat-menu { display: none; z-index: 120; background: rgba(4, 5, 10, 0.88); }
         #cheat-wheel {
@@ -645,6 +648,12 @@
             <label class="volume-control"><input class="comfort-mode-checkbox" type="checkbox" checked> 舒适画面（减少晃动与闪烁）</label>
         </div>
         <div class="death-preview">试听死亡音效：<button type="button" data-death-preview="0">饿啊 ①</button><button type="button" data-death-preview="1">饿啊 ②</button></div>
+        <div class="m7-audio-choices">M7 点射切片：
+            <button type="button" data-m7-preview="a">试听 A · 首发 132ms</button>
+            <button type="button" data-m7-preview="b">试听 B · 中段 94ms</button>
+            <button type="button" data-m7-preview="c">试听 C · 后段 92ms</button>
+            <label>使用 <select class="m7-shot-select"><option value="a">A</option><option value="b">B</option><option value="c">C</option></select></label>
+        </div>
 
     </div>
 
@@ -663,6 +672,12 @@
             <label class="volume-control"><input class="comfort-mode-checkbox" type="checkbox" checked> 舒适画面（减少晃动与闪烁）</label>
         </div>
         <div class="death-preview">试听死亡音效：<button type="button" data-death-preview="0">饿啊 ①</button><button type="button" data-death-preview="1">饿啊 ②</button></div>
+        <div class="m7-audio-choices">M7 点射切片：
+            <button type="button" data-m7-preview="a">试听 A · 首发 132ms</button>
+            <button type="button" data-m7-preview="b">试听 B · 中段 94ms</button>
+            <button type="button" data-m7-preview="c">试听 C · 后段 92ms</button>
+            <label>使用 <select class="m7-shot-select"><option value="a">A</option><option value="b">B</option><option value="c">C</option></select></label>
+        </div>
         <button class="action-btn" onclick="window.game.resumeFromPause()">继续探索</button>
     </div>
 

@@ -42,7 +42,7 @@ class BackroomsGame {
         this.awmOwned = false;
         this.m7Owned = false;
         this.m7Magazine = 20;
-        this.m7Reserve = 40;
+        this.m7Reserve = 80;
         this.m7ReloadEnd = 0;
         this.m7ReloadStart = 0;
         this.ammo = 0;
@@ -317,7 +317,8 @@ class BackroomsGame {
 
         const loadTex = (key) => {
             return new Promise((resolve) => {
-                const src = assets[key] || `assets/textures/${key}.jpg`;
+                const src = assets[key] || (key === 'smiler_hit' ? 'assets/images/smiler-hit.png'
+                    : key === 'smiler_defeated' ? 'assets/images/smiler-defeated.png' : `assets/textures/${key}.jpg`);
                 texLoader.load(src, (tex) => {
                     this.textures[key] = tex;
                     resolve(tex);
@@ -334,6 +335,8 @@ class BackroomsGame {
             loadTex('ceiling'),
             loadTex('exit_door'),
             loadTex('smiler'),
+            loadTex('smiler_hit'),
+            loadTex('smiler_defeated'),
             loadTex('almond_water'),
             loadTex('keycard'),
             loadTex('battery')
@@ -442,6 +445,7 @@ class BackroomsGame {
         addInstances(pillarGeo, pillarPositions, [0.82, 1.13]);
         this.addArchitecturalTrim();
         this.addDoorwayFrames();
+        this.addArcadeHall();
         this.addMapDetails();
         this.addSurfaceWear();
         this.addObstacles();
@@ -594,6 +598,57 @@ class BackroomsGame {
         posts.instanceMatrix.needsUpdate = true;
         lintels.instanceMatrix.needsUpdate = true;
         this.scene.add(posts, lintels);
+    }
+
+    addArcadeHall() {
+        // A long, open arcade inspired by the supplied Level 0 hall reference.
+        const room = this.map.openRooms[0];
+        const count = room.x1 - room.x0 - 1;
+        const arch = new THREE.Shape();
+        arch.moveTo(-2, 0);
+        arch.lineTo(-2, this.map.wallHeight);
+        arch.lineTo(2, this.map.wallHeight);
+        arch.lineTo(2, 0);
+        arch.lineTo(1.5, 0);
+        arch.lineTo(1.5, 1.48);
+        arch.absarc(0, 1.48, 1.5, 0, Math.PI, false);
+        arch.lineTo(-1.5, 0);
+        arch.closePath();
+        const facades = new THREE.InstancedMesh(
+            new THREE.ExtrudeGeometry(arch, { depth: 0.16, bevelEnabled: false, curveSegments: 10 }),
+            new THREE.MeshStandardMaterial({ color: 0xd1c39a, roughness: 0.95, side: THREE.DoubleSide }),
+            count
+        );
+        const recesses = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(2.96, 2.88, 0.025),
+            new THREE.MeshStandardMaterial({ color: 0xabb7a0, roughness: 0.96 }),
+            count
+        );
+        const halfWalls = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(2.98, 1.02, 0.12),
+            new THREE.MeshStandardMaterial({ color: 0xd5c8a7, roughness: 0.94 }),
+            count
+        );
+        const anchor = new THREE.Object3D();
+        for (let i = 0; i < count; i++) {
+            const x = (room.x0 + i + 1) * this.map.cellSize;
+            const boundaryZ = (room.z1 + 0.5) * this.map.cellSize;
+            anchor.position.set(x, 0, boundaryZ - 0.2);
+            anchor.rotation.set(0, 0, 0);
+            anchor.updateMatrix();
+            facades.setMatrixAt(i, anchor.matrix);
+            anchor.position.set(x, 1.44, boundaryZ - 0.015);
+            anchor.updateMatrix();
+            recesses.setMatrixAt(i, anchor.matrix);
+            anchor.position.set(x, 0.51, boundaryZ - 0.25);
+            anchor.updateMatrix();
+            halfWalls.setMatrixAt(i, anchor.matrix);
+            const shade = 0.82 + this.visualNoise(i, room.z1, 453) * 0.18;
+            recesses.setColorAt(i, new THREE.Color(shade, shade, shade * 0.92));
+        }
+        for (const mesh of [facades, recesses, halfWalls]) mesh.instanceMatrix.needsUpdate = true;
+        if (recesses.instanceColor) recesses.instanceColor.needsUpdate = true;
+        this.scene.add(facades, recesses, halfWalls);
     }
 
     visualNoise(x, z, salt = 0) {
@@ -1363,6 +1418,7 @@ class BackroomsGame {
         this.setupBarkVolumeControls();
         this.setupFrameRateControls();
         this.setupComfortControls();
+        this.setupM7AudioControls();
         this.setupCheatWheel();
         document.querySelectorAll('[data-death-preview]').forEach(button => {
             button.addEventListener('click', () => this.audio.playDeathCall(Number(button.dataset.deathPreview)));
@@ -1396,6 +1452,19 @@ class BackroomsGame {
                 document.querySelectorAll('.comfort-mode-checkbox').forEach(other => { other.checked = this.comfortMode; });
                 try { localStorage.setItem('gameComfortMode', this.comfortMode ? 'on' : 'off'); } catch (_) {}
             });
+        });
+    }
+
+    setupM7AudioControls() {
+        document.querySelectorAll('.m7-shot-select').forEach(select => {
+            select.value = this.audio.m7ShotVariant;
+            select.addEventListener('change', () => {
+                this.audio.setM7ShotVariant(select.value);
+                document.querySelectorAll('.m7-shot-select').forEach(other => { other.value = select.value; });
+            });
+        });
+        document.querySelectorAll('[data-m7-preview]').forEach(button => {
+            button.addEventListener('click', () => this.audio.playM7Preview(button.dataset.m7Preview));
         });
     }
 
@@ -1819,7 +1888,7 @@ class BackroomsGame {
                     this.showNotification('🎯 捡到 AWM！按 [4] 装备，右键开镜，一枪击倒 Smiler');
                 } else if (item.type === 'm7') {
                     this.m7Owned = true;
-                    this.m7Reserve = Math.max(this.m7Reserve, 40);
+                    this.m7Reserve = Math.max(this.m7Reserve, 80);
                     this.selectSlot(5);
                     this.showNotification('🔫 捡到 M7！按 [5] 装备，按住左键射击，R 换弹；10 发击倒 Smiler');
                 } else if (item.type === 'ammo') {

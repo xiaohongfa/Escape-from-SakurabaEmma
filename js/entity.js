@@ -21,6 +21,7 @@ class BackroomsEntity {
         this.isDead = false;
         this.respawnTimer = 0;
         this.hitFlashTimer = 0;
+        this.deathPoseTimer = 0;
         this.slowTimer = 0;
         this.pathRepathTimer = 0;
         this.pathWaypoint = null;
@@ -40,6 +41,9 @@ class BackroomsEntity {
     initMesh() {
         // Create 3D billboard sprite for The Smiler
         const smilerTex = this.textureMap['smiler'] || null;
+        this.defaultTexture = smilerTex;
+        this.hitTexture = this.textureMap['smiler_hit'] || smilerTex;
+        this.defeatTexture = this.textureMap['smiler_defeated'] || smilerTex;
         const mat = new THREE.SpriteMaterial({
             map: smilerTex,
             transparent: true,
@@ -55,6 +59,8 @@ class BackroomsEntity {
 
     update(delta, playerPos, isPlayerSprinting, otherEntities = [], isPlayerHidden = false) {
         if (this.isDead) {
+            this.deathPoseTimer -= delta;
+            if (this.deathPoseTimer <= 0 && this.sprite.parent) this.scene.remove(this.sprite);
             this.respawnTimer -= delta;
             if (this.respawnTimer <= 0) {
                 this.respawnElsewhere(playerPos, otherEntities);
@@ -65,7 +71,10 @@ class BackroomsEntity {
 
         if (this.hitFlashTimer > 0) {
             this.hitFlashTimer -= delta;
-            if (this.hitFlashTimer <= 0) this.sprite.material.color.setHex(this.isXRayEnabled ? 0xffd7f5 : 0xffffff);
+            if (this.hitFlashTimer <= 0) {
+                this.sprite.material.map = this.defaultTexture;
+                this.sprite.material.color.setHex(this.isXRayEnabled ? 0xffd7f5 : 0xffffff);
+            }
         }
         this.slowTimer = Math.max(0, this.slowTimer - delta);
         let distToPlayer = this.position.distanceTo(playerPos);
@@ -202,7 +211,9 @@ class BackroomsEntity {
         if (this.health <= 0) {
             this.isDead = true;
             this.respawnTimer = 12;
-            this.scene.remove(this.sprite);
+            this.deathPoseTimer = 0.85;
+            this.sprite.material.map = this.defeatTexture;
+            this.sprite.material.color.setHex(0xffffff);
             if (this.audio && this.audio.playDeathCall) {
                 const distance = listenerPosition ? this.position.distanceTo(listenerPosition) : null;
                 this.audio.playDeathCall(null, distance);
@@ -210,8 +221,9 @@ class BackroomsEntity {
             return true;
         }
         this.slowTimer = Math.max(this.slowTimer, 2.1);
-        this.hitFlashTimer = 0.22;
-        this.sprite.material.color.setHex(0xff5656);
+        this.hitFlashTimer = 0.38;
+        this.sprite.material.map = this.hitTexture;
+        this.sprite.material.color.setHex(0xffdddd);
         return false;
     }
 
@@ -248,6 +260,7 @@ class BackroomsEntity {
         this.velocity.set(0, 0, 0);
         this.health = this.maxHealth;
         this.isDead = false;
+        this.deathPoseTimer = 0;
         this.slowTimer = 0;
         this.pathWaypoint = null;
         this.pathRepathTimer = 0;
@@ -257,6 +270,7 @@ class BackroomsEntity {
         this.investigateTarget = null;
         this.changeTargetTimer = 0;
         this.sprite.material.color.setHex(this.isXRayEnabled ? 0xffd7f5 : 0xffffff);
+        this.sprite.material.map = this.defaultTexture;
         this.sprite.position.copy(this.position);
         this.scene.add(this.sprite);
     }
