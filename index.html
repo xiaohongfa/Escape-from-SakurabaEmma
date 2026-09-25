@@ -414,6 +414,24 @@
             color: #d8cba0;
         }
 
+        #start-screen .instructions-card {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px 18px;
+            width: min(960px, 95vw);
+            padding: 14px 18px;
+            margin-bottom: 15px;
+            font-size: 13px;
+            line-height: 1.45;
+        }
+        #start-screen > .action-btn { margin-bottom: 18px; flex-shrink: 0; }
+        @media (max-width: 760px) {
+            #start-screen .instructions-card { grid-template-columns: 1fr; }
+            #start-screen .title-glitch { font-size: 28px; letter-spacing: 2px; }
+            #start-screen { padding: 18px 12px; }
+            #start-screen > .action-btn { font-size: 15px; padding: 12px 16px; letter-spacing: 1px; }
+        }
+
         .key-tag {
             background: #3a321d;
             border: 1px solid #947e45;
@@ -593,6 +611,7 @@
     <div id="start-screen" class="screen-modal">
         <h1 class="title-glitch">THE BACKROOMS</h1>
         <div style="font-size: 24px; color: #d4b55c; letter-spacing: 4px; margin-bottom: 12px;">LEVEL 0 // 拟态黄界</div>
+        <button class="action-btn" onclick="window.game.startGame()">进入后室 (ENTER THE VOID)</button>
         <p class="subtitle">
             你不慎在现实中发生了“卡入 (No-Clip)”，坠落进了这片由潮湿地毯、泛黄壁纸与嗡嗡作响的荧光灯构成的无限迷宫。
             收集散落在迷宫深处的 3 张门禁芯片，躲避分散巡逻的多个“微笑者实体”，找到安全出口完成逃离！
@@ -627,7 +646,6 @@
         </div>
         <div class="death-preview">试听死亡音效：<button type="button" data-death-preview="0">饿啊 ①</button><button type="button" data-death-preview="1">饿啊 ②</button></div>
 
-        <button class="action-btn" onclick="window.game.startGame()">进入后室 (ENTER THE VOID)</button>
     </div>
 
     <!-- Pause Modal -->
