@@ -75,6 +75,7 @@ class BackroomsGame {
         this.mouseMove = { x: 0, y: 0 };
         this.isPointerLocked = false;
         this.mouseLookFallback = false;
+        this.isDesktopHost = new URLSearchParams(window.location.search).has('desktop');
         this.lastFreeMouseX = null;
         this.lastFreeMouseY = null;
         this.headBobTimer = 0;
@@ -344,6 +345,8 @@ class BackroomsGame {
         addInstances(wallGeo, wallPositions, [0.9, 1.08]);
         addInstances(pillarGeo, pillarPositions, [0.82, 1.13]);
         this.addMapDetails();
+        this.addSurfaceWear();
+        this.addObstacles();
         this.addLockers();
 
         // 4. Exit Door at exit coordinate
@@ -494,6 +497,283 @@ class BackroomsGame {
             });
             pipes.instanceMatrix.needsUpdate = true;
             this.scene.add(pipes);
+        }
+    }
+
+    addSurfaceWear() {
+        const cs = this.map.cellSize;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const stain = ctx.createRadialGradient(64, 64, 8, 64, 64, 63);
+        stain.addColorStop(0, 'rgba(41, 33, 17, 0.72)');
+        stain.addColorStop(0.48, 'rgba(52, 44, 24, 0.48)');
+        stain.addColorStop(0.82, 'rgba(46, 37, 19, 0.18)');
+        stain.addColorStop(1, 'rgba(46, 37, 19, 0)');
+        ctx.fillStyle = stain;
+        ctx.fillRect(0, 0, 128, 128);
+        const stainTexture = new THREE.CanvasTexture(canvas);
+        stainTexture.encoding = THREE.sRGBEncoding;
+        const stainMaterial = new THREE.MeshBasicMaterial({
+            map: stainTexture, transparent: true, depthWrite: false,
+            side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1
+        });
+        const wallCanvas = document.createElement('canvas');
+        wallCanvas.width = wallCanvas.height = 128;
+        const wallCtx = wallCanvas.getContext('2d');
+        const damp = wallCtx.createRadialGradient(64, 56, 3, 64, 64, 70);
+        damp.addColorStop(0, 'rgba(50, 42, 24, 0.6)');
+        damp.addColorStop(0.7, 'rgba(52, 43, 25, 0.22)');
+        damp.addColorStop(1, 'rgba(52, 43, 25, 0)');
+        wallCtx.fillStyle = damp;
+        wallCtx.fillRect(0, 0, 128, 128);
+        wallCtx.strokeStyle = 'rgba(42, 34, 20, 0.36)';
+        wallCtx.lineWidth = 3;
+        for (let i = 0; i < 7; i++) {
+            const x = 25 + i * 13;
+            wallCtx.beginPath();
+            wallCtx.moveTo(x, 18 + (i % 3) * 11);
+            wallCtx.bezierCurveTo(x - 7, 45, x + 5, 67, x - 3, 82 + (i % 4) * 8);
+            wallCtx.stroke();
+        }
+        const wallTexture = new THREE.CanvasTexture(wallCanvas);
+        wallTexture.encoding = THREE.sRGBEncoding;
+        const wallStainMaterial = new THREE.MeshBasicMaterial({
+            map: wallTexture, transparent: true, depthWrite: false,
+            side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1
+        });
+
+        const floorCells = [];
+        const debrisCells = [];
+        const wallFaces = [];
+        const sides = [
+            { dx: 1, dz: 0, angle: Math.PI / 2 },
+            { dx: -1, dz: 0, angle: -Math.PI / 2 },
+            { dx: 0, dz: 1, angle: 0 },
+            { dx: 0, dz: -1, angle: Math.PI }
+        ];
+        for (let z = 1; z < this.map.height - 1; z++) {
+            for (let x = 1; x < this.map.width - 1; x++) {
+                if (this.map.isWalkable(x, z)) {
+                    if (this.visualNoise(x, z, 203) < 0.48) floorCells.push({ x, z });
+                    if (this.visualNoise(x, z, 211) < 0.34) debrisCells.push({ x, z });
+                } else if (this.map.grid[z][x] === 1) {
+                    sides.forEach((side, index) => {
+                        if (this.map.isWalkable(x + side.dx, z + side.dz)) {
+                            wallFaces.push({ x, z, side, index });
+                        }
+                    });
+                }
+            }
+        }
+
+        const anchor = new THREE.Object3D();
+        if (floorCells.length) {
+            const floorStains = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), stainMaterial, floorCells.length);
+            floorCells.forEach(({ x, z }, index) => {
+                const offsetX = (this.visualNoise(x, z, 213) - 0.5) * 1.7;
+                const offsetZ = (this.visualNoise(x, z, 214) - 0.5) * 1.7;
+                anchor.position.set(x * cs + offsetX, 0.016, z * cs + offsetZ);
+                anchor.rotation.set(-Math.PI / 2, 0, this.visualNoise(x, z, 215) * Math.PI * 2);
+                anchor.scale.set(0.9 + this.visualNoise(x, z, 216) * 1.9, 0.7 + this.visualNoise(x, z, 217) * 1.5, 1);
+                anchor.updateMatrix();
+                floorStains.setMatrixAt(index, anchor.matrix);
+            });
+            floorStains.instanceMatrix.needsUpdate = true;
+            floorStains.frustumCulled = false;
+            this.scene.add(floorStains);
+        }
+
+        if (wallFaces.length) {
+            const trim = new THREE.InstancedMesh(
+                new THREE.BoxGeometry(1, 1, 1),
+                new THREE.MeshStandardMaterial({ color: 0x4e4837, roughness: 0.95 }),
+                wallFaces.length
+            );
+            wallFaces.forEach(({ x, z, side }, index) => {
+                anchor.position.set(x * cs + side.dx * (cs / 2 + 0.035), 0.065, z * cs + side.dz * (cs / 2 + 0.035));
+                anchor.rotation.set(0, side.angle, 0);
+                anchor.scale.set(cs - 0.07, 0.13, 0.08);
+                anchor.updateMatrix();
+                trim.setMatrixAt(index, anchor.matrix);
+            });
+            trim.instanceMatrix.needsUpdate = true;
+            trim.frustumCulled = false;
+            this.scene.add(trim);
+
+            const wornFaces = wallFaces.filter(({ x, z, index }) => this.visualNoise(x, z, 230 + index) < 0.24);
+            if (wornFaces.length) {
+                const wallStains = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), wallStainMaterial, wornFaces.length);
+                wornFaces.forEach(({ x, z, side, index }, i) => {
+                    const along = (this.visualNoise(x, z, 235 + index) - 0.5) * 1.45;
+                    const acrossX = side.dz ? along : 0;
+                    const acrossZ = side.dx ? along : 0;
+                    anchor.position.set(
+                        x * cs + side.dx * (cs / 2 + 0.014) + acrossX,
+                        1.1 + this.visualNoise(x, z, 239 + index) * 0.95,
+                        z * cs + side.dz * (cs / 2 + 0.014) + acrossZ
+                    );
+                    anchor.rotation.set(0, side.angle, 0);
+                    anchor.scale.set(0.8 + this.visualNoise(x, z, 243 + index) * 1.6, 0.7 + this.visualNoise(x, z, 247 + index) * 1.5, 1);
+                    anchor.updateMatrix();
+                    wallStains.setMatrixAt(i, anchor.matrix);
+                });
+                wallStains.instanceMatrix.needsUpdate = true;
+                wallStains.frustumCulled = false;
+                this.scene.add(wallStains);
+            }
+        }
+
+        if (debrisCells.length) {
+            const debris = new THREE.InstancedMesh(
+                new THREE.BoxGeometry(1, 1, 1),
+                new THREE.MeshStandardMaterial({ color: 0xb4a789, roughness: 1 }),
+                debrisCells.length * 2
+            );
+            debrisCells.forEach(({ x, z }, cellIndex) => {
+                for (let piece = 0; piece < 2; piece++) {
+                    const salt = 260 + piece * 5;
+                    anchor.position.set(
+                        x * cs + (this.visualNoise(x, z, salt) - 0.5) * 2.7,
+                        0.018,
+                        z * cs + (this.visualNoise(x, z, salt + 1) - 0.5) * 2.7
+                    );
+                    anchor.rotation.set(0, this.visualNoise(x, z, salt + 2) * Math.PI * 2, 0);
+                    anchor.scale.set(0.08 + this.visualNoise(x, z, salt + 3) * 0.3, 0.025, 0.06 + this.visualNoise(x, z, salt + 4) * 0.22);
+                    anchor.updateMatrix();
+                    debris.setMatrixAt(cellIndex * 2 + piece, anchor.matrix);
+                }
+            });
+            debris.instanceMatrix.needsUpdate = true;
+            debris.frustumCulled = false;
+            this.scene.add(debris);
+        }
+    }
+
+    addObstacles() {
+        const obstacles = this.map.obstacles;
+        const crates = obstacles.filter(item => item.kind === 'crates');
+        const cabinets = obstacles.filter(item => item.kind === 'cabinet');
+        const barrels = obstacles.filter(item => item.kind === 'barrel');
+        const box = new THREE.BoxGeometry(1, 1, 1);
+        const anchor = new THREE.Object3D();
+        const crateCanvas = document.createElement('canvas');
+        crateCanvas.width = crateCanvas.height = 128;
+        const crateCtx = crateCanvas.getContext('2d');
+        crateCtx.fillStyle = '#9a7b50';
+        crateCtx.fillRect(0, 0, 128, 128);
+        crateCtx.strokeStyle = '#58452e';
+        crateCtx.lineWidth = 5;
+        for (let y = 5; y < 128; y += 40) {
+            crateCtx.beginPath();
+            crateCtx.moveTo(0, y);
+            crateCtx.lineTo(128, y + 2);
+            crateCtx.stroke();
+        }
+        crateCtx.strokeStyle = 'rgba(63, 48, 30, 0.48)';
+        crateCtx.lineWidth = 2;
+        for (let x = 17; x < 128; x += 29) {
+            crateCtx.beginPath();
+            crateCtx.moveTo(x, 0);
+            crateCtx.lineTo(x + 8, 128);
+            crateCtx.stroke();
+        }
+        const crateTexture = new THREE.CanvasTexture(crateCanvas);
+        crateTexture.encoding = THREE.sRGBEncoding;
+
+        if (crates.length) {
+            const crateMesh = new THREE.InstancedMesh(
+                box,
+                new THREE.MeshStandardMaterial({ map: crateTexture, roughness: 0.93 }),
+                crates.length * 2
+            );
+            crates.forEach((item, index) => {
+                anchor.rotation.set(0, 0, 0);
+                anchor.position.set(item.x, 0.37, item.z);
+                anchor.scale.set(1.1, 0.74, 1.05);
+                anchor.updateMatrix();
+                crateMesh.setMatrixAt(index * 2, anchor.matrix);
+                anchor.position.set(item.x + 0.08, 0.98, item.z - 0.05);
+                anchor.scale.set(0.78, 0.45, 0.78);
+                anchor.updateMatrix();
+                crateMesh.setMatrixAt(index * 2 + 1, anchor.matrix);
+                const shade = 0.82 + this.visualNoise(item.cellX, item.cellZ, 310) * 0.25;
+                const color = new THREE.Color(shade, shade * 0.92, shade * 0.75);
+                crateMesh.setColorAt(index * 2, color);
+                crateMesh.setColorAt(index * 2 + 1, color);
+            });
+            crateMesh.instanceMatrix.needsUpdate = true;
+            if (crateMesh.instanceColor) crateMesh.instanceColor.needsUpdate = true;
+            crateMesh.frustumCulled = false;
+            this.scene.add(crateMesh);
+        }
+
+        if (cabinets.length) {
+            const cabinetMesh = new THREE.InstancedMesh(
+                box,
+                new THREE.MeshStandardMaterial({ color: 0x646a63, roughness: 0.78, metalness: 0.25 }),
+                cabinets.length
+            );
+            const cabinetDoors = new THREE.InstancedMesh(
+                box,
+                new THREE.MeshStandardMaterial({ color: 0x818579, roughness: 0.72, metalness: 0.3 }),
+                cabinets.length
+            );
+            cabinets.forEach((item, index) => {
+                anchor.rotation.set(0, 0, 0);
+                anchor.position.set(item.x, item.height / 2, item.z);
+                anchor.scale.set(item.halfX * 2, item.height, item.halfZ * 2);
+                anchor.updateMatrix();
+                cabinetMesh.setMatrixAt(index, anchor.matrix);
+                const longAlongX = item.halfX > item.halfZ;
+                const towardCenter = longAlongX
+                    ? (item.z > item.cellZ * this.map.cellSize ? -1 : 1)
+                    : (item.x > item.cellX * this.map.cellSize ? -1 : 1);
+                anchor.position.set(
+                    item.x + (longAlongX ? 0 : towardCenter * (item.halfX + 0.027)),
+                    item.height / 2,
+                    item.z + (longAlongX ? towardCenter * (item.halfZ + 0.027) : 0)
+                );
+                anchor.rotation.set(0, longAlongX ? 0 : Math.PI / 2, 0);
+                anchor.scale.set(1.45, 1.83, 0.045);
+                anchor.updateMatrix();
+                cabinetDoors.setMatrixAt(index, anchor.matrix);
+            });
+            cabinetMesh.instanceMatrix.needsUpdate = true;
+            cabinetDoors.instanceMatrix.needsUpdate = true;
+            cabinetMesh.frustumCulled = false;
+            cabinetDoors.frustumCulled = false;
+            this.scene.add(cabinetMesh, cabinetDoors);
+        }
+
+        if (barrels.length) {
+            const barrelMesh = new THREE.InstancedMesh(
+                new THREE.CylinderGeometry(0.41, 0.42, 1.1, 10),
+                new THREE.MeshStandardMaterial({ color: 0x6d4935, roughness: 0.84, metalness: 0.32 }),
+                barrels.length
+            );
+            const barrelBands = new THREE.InstancedMesh(
+                new THREE.CylinderGeometry(0.435, 0.435, 0.075, 10),
+                new THREE.MeshStandardMaterial({ color: 0x353a34, roughness: 0.7, metalness: 0.48 }),
+                barrels.length * 2
+            );
+            barrels.forEach((item, index) => {
+                anchor.rotation.set(0, 0, 0);
+                anchor.scale.set(1, 1, 1);
+                anchor.position.set(item.x, 0.55, item.z);
+                anchor.updateMatrix();
+                barrelMesh.setMatrixAt(index, anchor.matrix);
+                for (let band = 0; band < 2; band++) {
+                    anchor.position.y = band === 0 ? 0.22 : 0.87;
+                    anchor.updateMatrix();
+                    barrelBands.setMatrixAt(index * 2 + band, anchor.matrix);
+                }
+            });
+            barrelMesh.instanceMatrix.needsUpdate = true;
+            barrelBands.instanceMatrix.needsUpdate = true;
+            barrelMesh.frustumCulled = false;
+            barrelBands.frustumCulled = false;
+            this.scene.add(barrelMesh, barrelBands);
         }
     }
 
@@ -778,6 +1058,11 @@ class BackroomsGame {
             this.isAimToggled = false;
             this.isAiming = false;
             this.audio.suspend();
+            if (this.isDesktopHost && this.isRunning && !this.cheatMenuOpen) {
+                const pauseOverlay = document.getElementById('pause-overlay');
+                if (pauseOverlay) pauseOverlay.style.display = 'flex';
+                if (document.pointerLockElement === this.container) document.exitPointerLock();
+            }
         });
 
         document.addEventListener('visibilitychange', () => {
@@ -804,8 +1089,8 @@ class BackroomsGame {
         this.container.addEventListener('click', () => {
             if (!this.isRunning && !this.isGameOver && !this.isVictory) {
                 this.startGame();
-            } else if (this.isRunning && !this.mouseLookFallback) {
-                this.container.requestPointerLock();
+            } else if (this.isRunning && !this.isPointerLocked && !this.cheatMenuOpen) {
+                this.requestMouseLock();
             }
         });
 
@@ -824,6 +1109,7 @@ class BackroomsGame {
                 if (this.isRunning && (this.isPointerLocked || this.mouseLookFallback)) this.audio.resume();
             }
         });
+        document.addEventListener('pointerlockerror', () => this.handleMouseLockFailure());
     }
 
     setupUI() {
@@ -881,18 +1167,33 @@ class BackroomsGame {
             if (pauseOverlay) pauseOverlay.style.display = 'none';
             if (document.pointerLockElement === this.container) document.exitPointerLock();
         } else {
-            if (this.mouseLookFallback) {
-                this.audio.resume();
-                return;
-            }
-            const lockRequest = this.container.requestPointerLock();
-            if (lockRequest && lockRequest.catch) lockRequest.catch(() => {
-                this.mouseLookFallback = true;
-                const pauseOverlay = document.getElementById('pause-overlay');
-                if (pauseOverlay) pauseOverlay.style.display = 'none';
-                this.audio.resume();
-            });
-            else this.audio.resume();
+            this.requestMouseLock();
+        }
+    }
+
+    requestMouseLock() {
+        this.mouseLookFallback = false;
+        this.lastFreeMouseX = null;
+        this.lastFreeMouseY = null;
+        try {
+            const request = this.container.requestPointerLock();
+            if (request && request.catch) request.catch(() => this.handleMouseLockFailure());
+        } catch (_) {
+            this.handleMouseLockFailure();
+        }
+    }
+
+    handleMouseLockFailure() {
+        if (!this.isRunning || this.cheatMenuOpen || this.isGameOver || this.isVictory) return;
+        const pauseOverlay = document.getElementById('pause-overlay');
+        if (this.isDesktopHost) {
+            if (pauseOverlay) pauseOverlay.style.display = 'flex';
+            this.audio.suspend();
+            this.showNotification('鼠标锁定失败，点击“继续探索”重试');
+        } else {
+            this.mouseLookFallback = true;
+            if (pauseOverlay) pauseOverlay.style.display = 'none';
+            this.audio.resume();
         }
     }
 
@@ -922,28 +1223,14 @@ class BackroomsGame {
         this.isRunning = true;
         this.audio.init();
         this.audio.resume();
-        const lockRequest = this.container.requestPointerLock();
-        if (lockRequest && lockRequest.catch) lockRequest.catch(() => {
-            this.mouseLookFallback = true;
-            const pauseOverlay = document.getElementById('pause-overlay');
-            if (pauseOverlay) pauseOverlay.style.display = 'none';
-            this.audio.resume();
-        });
+        this.requestMouseLock();
         document.getElementById('start-screen').style.display = 'none';
     }
 
     resumeFromPause() {
         const pauseOverlay = document.getElementById('pause-overlay');
         if (pauseOverlay) pauseOverlay.style.display = 'none';
-        if (this.mouseLookFallback) {
-            this.audio.resume();
-            return;
-        }
-        const lockRequest = this.container.requestPointerLock();
-        if (lockRequest && lockRequest.catch) lockRequest.catch(() => {
-            this.mouseLookFallback = true;
-            this.audio.resume();
-        });
+        this.requestMouseLock();
     }
 
     toggleFlashlight() {
@@ -1696,6 +1983,14 @@ class BackroomsGame {
                     ctx.fillRect(padding + x * cellW, padding + z * cellH, Math.ceil(cellW), Math.ceil(cellH));
                 }
             }
+        }
+
+        for (const obstacle of this.map.obstacles) {
+            const marker = pointFor(obstacle.x, obstacle.z);
+            const markerW = Math.max(2, obstacle.halfX * 2 / cs * cellW);
+            const markerH = Math.max(2, obstacle.halfZ * 2 / cs * cellH);
+            ctx.fillStyle = obstacle.kind === 'cabinet' ? '#9da394' : obstacle.kind === 'barrel' ? '#a06142' : '#bd9665';
+            ctx.fillRect(marker.x - markerW / 2, marker.y - markerH / 2, markerW, markerH);
         }
 
         // Draw Exit

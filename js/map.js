@@ -52,6 +52,7 @@ class BackroomsMap {
         this.awmSpawns = [];
         this.ammoCaches = [];
         this.lockers = [];
+        this.obstacles = [];
         this.pillars = [];
         this.lights = [];
 
@@ -129,6 +130,44 @@ class BackroomsMap {
         this.awmSpawns = this.pickSpecialCells(1, [...reservedLoot, ...this.weaponSpawns], 9);
         this.ammoCaches = this.pickSpecialCells(4, [...reservedLoot, ...this.weaponSpawns, ...this.awmSpawns], 9);
         this.lockers = this.pickSpecialCells(4, [...reservedLoot, ...this.weaponSpawns, ...this.awmSpawns, ...this.ammoCaches], 16);
+        this.generateObstacles();
+    }
+
+    generateObstacles() {
+        const reserved = [
+            this.playerSpawn, this.monsterSpawn, this.exitDoor,
+            ...this.keycards, ...this.almondWaters, ...this.batteries,
+            ...this.hazards, ...this.memoryFragments, ...this.weaponSpawns,
+            ...this.awmSpawns, ...this.ammoCaches, ...this.lockers
+        ];
+        const hash = (x, z, salt) => {
+            const value = Math.sin(x * 127.1 + z * 311.7 + salt * 43.13) * 43758.5453;
+            return value - Math.floor(value);
+        };
+        for (let z = 1; z < this.height - 1; z++) {
+            for (let x = 1; x < this.width - 1; x++) {
+                if (!this.isWalkable(x, z)) continue;
+                const firstCorridor = x === 3 && z === 1;
+                if (!firstCorridor && hash(x, z, 1) > 0.3) continue;
+                if (reserved.some(cell => firstCorridor
+                    ? cell.x === x && cell.z === z
+                    : (cell.x - x) ** 2 + (cell.z - z) ** 2 < 2)) continue;
+                if (!firstCorridor && this.obstacles.some(item => (item.cellX - x) ** 2 + (item.cellZ - z) ** 2 < 5)) continue;
+
+                const kindRoll = firstCorridor ? 0 : hash(x, z, 2);
+                const kind = kindRoll < 0.44 ? 'crates' : kindRoll < 0.72 ? 'cabinet' : 'barrel';
+                const alongX = firstCorridor ? false : hash(x, z, 3) < 0.5;
+                const side = firstCorridor ? 1 : (hash(x, z, 4) < 0.5 ? -1 : 1);
+                const offset = 1.25;
+                const worldX = x * this.cellSize + (alongX ? side * offset : 0);
+                const worldZ = z * this.cellSize + (alongX ? 0 : side * offset);
+                const longAlongX = !alongX;
+                const halfX = kind === 'cabinet' ? (longAlongX ? 0.85 : 0.35) : kind === 'crates' ? 0.56 : 0.43;
+                const halfZ = kind === 'cabinet' ? (longAlongX ? 0.35 : 0.85) : kind === 'crates' ? 0.54 : 0.43;
+                const height = kind === 'cabinet' ? 2.15 : kind === 'crates' ? 1.2 : 1.1;
+                this.obstacles.push({ cellX: x, cellZ: z, x: worldX, z: worldZ, halfX, halfZ, height, kind });
+            }
+        }
     }
 
     pickSpecialCells(count, forbidden, spacingSq) {
@@ -164,6 +203,12 @@ class BackroomsMap {
             const t = i / steps;
             const cell = this.worldToGrid(from.x + dx * t, from.z + dz * t);
             if (!this.isWalkable(cell.x, cell.z)) return false;
+            const px = from.x + dx * t;
+            const pz = from.z + dz * t;
+            const py = from.y + (to.y - from.y) * t;
+            if (this.obstacles.some(item =>
+                py < item.height && Math.abs(px - item.x) < item.halfX && Math.abs(pz - item.z) < item.halfZ
+            )) return false;
         }
         return true;
     }
@@ -262,6 +307,28 @@ class BackroomsMap {
                         pos.z += (distZ / dist) * pushDist;
                     }
                 }
+            }
+        }
+
+        for (const item of this.obstacles) {
+            // Small clutter can be jumped over; tall cabinets must be circled.
+            if (pos.y > item.height + 0.85) continue;
+            if (Math.abs(pos.x - item.x) > item.halfX + radius || Math.abs(pos.z - item.z) > item.halfZ + radius) continue;
+            const nearX = Math.max(item.x - item.halfX, Math.min(pos.x, item.x + item.halfX));
+            const nearZ = Math.max(item.z - item.halfZ, Math.min(pos.z, item.z + item.halfZ));
+            const dx = pos.x - nearX;
+            const dz = pos.z - nearZ;
+            const distanceSq = dx * dx + dz * dz;
+            if (distanceSq >= radius * radius) continue;
+            if (distanceSq > 0.000001) {
+                const push = radius / Math.sqrt(distanceSq) - 1;
+                pos.x += dx * push;
+                pos.z += dz * push;
+            } else {
+                const clearX = item.halfX + radius - Math.abs(pos.x - item.x);
+                const clearZ = item.halfZ + radius - Math.abs(pos.z - item.z);
+                if (clearX < clearZ) pos.x += pos.x < item.x ? -clearX : clearX;
+                else pos.z += pos.z < item.z ? -clearZ : clearZ;
             }
         }
     }

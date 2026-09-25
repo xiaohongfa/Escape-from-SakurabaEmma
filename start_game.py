@@ -24,7 +24,7 @@ def main():
         ("127.0.0.1", 0), partial(Handler, directory=str(ROOT))
     )
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    url = f"http://127.0.0.1:{server.server_port}/index.html"
+    url = f"http://127.0.0.1:{server.server_port}/index.html?desktop=1"
     print("Starting The Backrooms desktop window...")
     try:
         webview.create_window(
