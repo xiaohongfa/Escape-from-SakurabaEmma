@@ -15,7 +15,7 @@ class BackroomsEntity {
         this.speed = 2.4;
         this.chaseSpeed = 4.8;
         this.state = 'PATROL'; // PATROL, INVESTIGATE, CHASE
-        // Whole-number units keep the pistol at three hits and the M7 at ten.
+        // Whole-number units keep the pistol at three hits and the M7 at five.
         this.maxHealth = 30;
         this.health = this.maxHealth;
         this.isDead = false;

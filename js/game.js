@@ -50,6 +50,14 @@ class BackroomsGame {
         this.shotCooldown = 0;
         this.lastM7ShotAt = -Infinity;
         this.smilersDefeated = 0;
+        this.smilerCount = 20;
+        try {
+            const stored = localStorage.getItem('gameSmilerCount');
+            if (stored !== null) {
+                const saved = Number(stored);
+                if (Number.isInteger(saved) && saved >= 0 && saved <= 40) this.smilerCount = saved;
+            }
+        } catch (_) {}
         this.isPlayerHidden = false;
         this.isAiming = false;
         this.isAimToggled = false;
@@ -1250,9 +1258,57 @@ class BackroomsGame {
             }
         }
 
-        this.entities = chosenSpawns.map(spawn =>
+        this.entities = chosenSpawns.slice(0, this.smilerCount).map(spawn =>
             new BackroomsEntity(this.scene, this.map, this.audio, this.textures, spawn)
         );
+        this.setSmilerCount(this.smilerCount);
+    }
+
+    setSmilerCount(value) {
+        const target = Math.max(0, Math.min(40, Math.round(Number(value) || 0)));
+        if (target < this.entities.length) {
+            this.audio.stopEntityBarks();
+            while (this.entities.length > target) {
+                const entity = this.entities.pop();
+                if (entity.sprite.parent) entity.sprite.parent.remove(entity.sprite);
+                entity.sprite.material.dispose();
+            }
+        }
+        while (this.entities.length < target) {
+            const spawn = this.findSmilerSpawn();
+            if (!spawn) break;
+            this.entities.push(new BackroomsEntity(this.scene, this.map, this.audio, this.textures, spawn));
+        }
+        this.smilerCount = this.entities.length;
+        return this.smilerCount;
+    }
+
+    findSmilerSpawn() {
+        const playerSpacingSq = (this.map.cellSize * 6) ** 2;
+        const player = this.camera.position;
+        const candidates = [];
+        for (let z = 1; z < this.map.height - 1; z++) {
+            for (let x = 1; x < this.map.width - 1; x++) {
+                if (!this.map.isWalkable(x, z) || this.map.isManilaRoom(x, z)) continue;
+                const world = this.map.gridToWorld(x, z);
+                const playerDistanceSq = (world.x - player.x) ** 2 + (world.z - player.z) ** 2;
+                if (playerDistanceSq < playerSpacingSq) continue;
+                const nearestSq = this.entities.reduce((nearest, entity) => {
+                    const distanceSq = (world.x - entity.position.x) ** 2 + (world.z - entity.position.z) ** 2;
+                    return Math.min(nearest, distanceSq);
+                }, Infinity);
+                candidates.push({ x, z, nearestSq, score: Math.min(nearestSq, playerDistanceSq) });
+            }
+        }
+        for (const cellsApart of [3, 2, 1]) {
+            const spacingSq = (this.map.cellSize * cellsApart) ** 2;
+            const spaced = candidates.filter(candidate => candidate.nearestSq >= spacingSq);
+            if (!spaced.length) continue;
+            spaced.sort((a, b) => b.score - a.score);
+            const pool = spaced.slice(0, Math.min(6, spaced.length));
+            return pool[Math.floor(Math.random() * pool.length)];
+        }
+        return null;
     }
 
     setupEvents() {
@@ -1420,6 +1476,7 @@ class BackroomsGame {
         this.vhsDate = document.getElementById('vhs-date');
         this.vhsTape = document.getElementById('vhs-tape');
         this.setupBarkVolumeControls();
+        this.setupSmilerCountControls();
         this.setupFrameRateControls();
         this.setupComfortControls();
         this.setupM7AudioControls();
@@ -1541,6 +1598,21 @@ class BackroomsGame {
             });
         });
         document.querySelectorAll('.smiler-volume-value').forEach(label => { label.innerText = `${savedVolume}%`; });
+    }
+
+    setupSmilerCountControls() {
+        const sync = () => {
+            document.querySelectorAll('.smiler-count-slider').forEach(slider => { slider.value = String(this.smilerCount); });
+            document.querySelectorAll('.smiler-count-value').forEach(label => { label.innerText = String(this.smilerCount); });
+        };
+        document.querySelectorAll('.smiler-count-slider').forEach(slider => {
+            slider.addEventListener('input', () => {
+                this.setSmilerCount(slider.value);
+                sync();
+                try { localStorage.setItem('gameSmilerCount', String(this.smilerCount)); } catch (_) {}
+            });
+        });
+        sync();
     }
 
     startGame() {
@@ -1798,7 +1870,7 @@ class BackroomsGame {
                 if (crosshair) crosshair.classList.add('hit');
                 clearTimeout(this.hitMarkerTimeout);
                 this.hitMarkerTimeout = setTimeout(() => crosshair && crosshair.classList.remove('hit'), 180);
-                const killed = entity.takeDamage(isAwm ? entity.maxHealth : isM7 ? 3 : 10, shotOrigin);
+                const killed = entity.takeDamage(isAwm ? entity.maxHealth : isM7 ? 6 : 10, shotOrigin);
                 this.audio.playHitConfirm(killed);
                 if (killed) {
                     this.smilersDefeated++;
@@ -1910,7 +1982,7 @@ class BackroomsGame {
                     this.m7Owned = true;
                     this.m7Reserve = Math.max(this.m7Reserve, 80);
                     this.selectSlot(5);
-                    this.showNotification('🔫 捡到 M7！按 [5] 装备，按住左键射击，R 换弹；10 发击倒 Smiler');
+                    this.showNotification('🔫 捡到 M7！按 [5] 装备，按住左键射击，R 换弹；5 发击倒 Smiler');
                 } else if (item.type === 'ammo') {
                     this.ammo = Math.min(90, this.ammo + 8);
                     this.m7Reserve = Math.min(160, this.m7Reserve + 20);
